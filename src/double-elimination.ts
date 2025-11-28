@@ -393,6 +393,21 @@ function linkWinnersToLosers(
       }
     }
   }
+
+  // Link Winners Finals loser to Losers Finals (slot 2)
+  // The loop above doesn't process the final winners round
+  const losersRounds = (winnersRounds - 1) * 2;
+  const winnersFinalsMatch = matches.find(
+    m => m.bracketType === 'winners' && m.round === winnersRounds
+  );
+  const losersFinalsMatch = matches.find(
+    m => m.bracketType === 'losers' && m.round === losersRounds
+  );
+
+  if (winnersFinalsMatch && losersFinalsMatch) {
+    winnersFinalsMatch.loserNextMatchId = losersFinalsMatch.id;
+    winnersFinalsMatch.loserNextMatchSlot = 2;
+  }
 }
 
 function advanceToMatch(
