@@ -112,22 +112,33 @@ describe('assignByes', () => {
     expect(byes.size).toBe(0);
   });
 
-  it('assigns byes to top seeds', () => {
-    // 6 participants in bracket size 8 = 2 byes
+  it('returns the phantom seed positions (those above participantCount)', () => {
+    // 6 participants in bracket size 8 → seeds 7,8 are phantoms; top seeds 1,2 get the bye benefit
     const byes = assignByes(6, 8);
     expect(byes.size).toBe(2);
-    expect(byes.has(1)).toBe(true);
-    expect(byes.has(2)).toBe(true);
-    expect(byes.has(3)).toBe(false);
+    expect(byes.has(7)).toBe(true);
+    expect(byes.has(8)).toBe(true);
+    expect(byes.has(1)).toBe(false);
+    expect(byes.has(2)).toBe(false);
   });
 
   it('handles larger bye counts', () => {
-    // 5 participants in bracket size 8 = 3 byes
+    // 5 participants in bracket size 8 → seeds 6,7,8 are phantoms
     const byes = assignByes(5, 8);
     expect(byes.size).toBe(3);
-    expect(byes.has(1)).toBe(true);
-    expect(byes.has(2)).toBe(true);
-    expect(byes.has(3)).toBe(true);
-    expect(byes.has(4)).toBe(false);
+    expect(byes.has(6)).toBe(true);
+    expect(byes.has(7)).toBe(true);
+    expect(byes.has(8)).toBe(true);
+    expect(byes.has(5)).toBe(false);
+    expect(byes.has(1)).toBe(false);
+  });
+
+  it('handles 13 participants in a 16-slot bracket (real-world case)', () => {
+    const byes = assignByes(13, 16);
+    expect(byes.size).toBe(3);
+    expect(byes.has(14)).toBe(true);
+    expect(byes.has(15)).toBe(true);
+    expect(byes.has(16)).toBe(true);
+    expect(byes.has(1)).toBe(false);
   });
 });

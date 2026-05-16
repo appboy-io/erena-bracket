@@ -22,7 +22,14 @@ export declare function generateMatchId(tournamentId: string, bracketType: strin
  */
 export declare function generateSeedOrder(bracketSize: number): number[];
 /**
- * Distribute byes optimally - higher seeds get byes first
+ * Return the set of seed positions that are "phantoms" — slots without a real
+ * participant because participantCount < bracketSize. These are always the
+ * highest-numbered seeds (e.g. 13 participants in a 16-slot bracket → {14,15,16}).
+ *
+ * Standard tournament convention: top seeds receive the privilege of a bye by
+ * being paired with these phantom slots, then auto-advancing. Consumers of
+ * this set check whether each side of a match is a phantom to decide whether
+ * to mark the match as a bye and advance the real player.
  */
 export declare function assignByes(participantCount: number, bracketSize: number): Set<number>;
 //# sourceMappingURL=utils.d.ts.map
