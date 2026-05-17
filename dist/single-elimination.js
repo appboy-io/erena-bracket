@@ -1,6 +1,26 @@
-import { nextPowerOf2, calculateRounds, generateMatchId, generateSeedOrder, assignByes, } from './utils.js';
+import { generateMatchId, computeRoundCounts, computeRoundByes, compressedSeedOrder, } from './utils.js';
 /**
- * Generate a single elimination bracket
+ * Generate a single elimination bracket with FLOW BYES.
+ *
+ * At each round, the alive count is halved (rounding up). When the alive
+ * count is odd, exactly one player byes — and the bye SLOT is placed at
+ * alternating ends of the bracket (R1 top, R2 bottom, R3 top, ...) to
+ * spread the bye privilege across different bracket halves.
+ *
+ * Match record properties:
+ *   - Total match records = N - 1 (the elimination minimum).
+ *   - Round R has `floor(aliveR / 2)` match records.
+ *   - A round-R bye is NOT a separate record: it's implemented by routing
+ *     the bye-getter's predecessor (or, in R1, the bye seed directly) past
+ *     round R to round R+1.
+ *
+ * Seeding:
+ *   - The N "entry slots" of round 1 (the bye-slot if present, plus each
+ *     match's two slots, top-to-bottom) receive seeds 1..N in a standard
+ *     bracket order. Concretely we take `generateSeedOrder(nextPowerOf2(N))`
+ *     and drop phantoms (ranks > N), producing N entry-position → seed
+ *     mappings. The top seed (seed 1) lands in the top entry slot — which
+ *     is the R1 bye-slot when one exists.
  */
 export function generateSingleElimination(options) {
     const { tournamentId, participants } = options;
@@ -8,31 +28,20 @@ export function generateSingleElimination(options) {
     if (participantCount < 2) {
         throw new Error('Need at least 2 participants for a bracket');
     }
-    const bracketSize = nextPowerOf2(participantCount);
-    const totalRounds = calculateRounds(bracketSize);
-    const seedOrder = generateSeedOrder(bracketSize);
-    const byeSeeds = assignByes(participantCount, bracketSize);
-    // Create participant lookup by seed
+    const roundCounts = computeRoundCounts(participantCount);
+    const roundByes = computeRoundByes(participantCount);
+    const totalRounds = roundCounts.length;
     const participantBySeed = new Map();
     for (const p of participants) {
         participantBySeed.set(p.seed, p);
     }
+    // === Create all match records ===
     const matches = [];
-    // Generate all rounds
     for (let round = 1; round <= totalRounds; round++) {
-        const matchesInRound = bracketSize / Math.pow(2, round);
+        const matchesInRound = roundCounts[round - 1];
         for (let position = 1; position <= matchesInRound; position++) {
-            const matchId = generateMatchId(tournamentId, 'winners', round, position);
-            // Calculate next match info
-            let nextMatchId = null;
-            let nextMatchSlot = null;
-            if (round < totalRounds) {
-                const nextPosition = Math.ceil(position / 2);
-                nextMatchId = generateMatchId(tournamentId, 'winners', round + 1, nextPosition);
-                nextMatchSlot = position % 2 === 1 ? 1 : 2;
-            }
-            const match = {
-                id: matchId,
+            matches.push({
+                id: generateMatchId(tournamentId, 'winners', round, position),
                 round,
                 position,
                 bracketType: 'winners',
@@ -42,65 +51,138 @@ export function generateSingleElimination(options) {
                 participant2Seed: null,
                 winner: null,
                 status: 'pending',
-                nextMatchId,
-                nextMatchSlot,
+                nextMatchId: null,
+                nextMatchSlot: null,
                 loserNextMatchId: null,
                 loserNextMatchSlot: null,
-            };
-            matches.push(match);
+            });
         }
     }
-    // Populate first round with participants based on seeding
-    const firstRoundMatches = matches.filter(m => m.round === 1);
-    const firstRoundMatchCount = firstRoundMatches.length;
-    for (let i = 0; i < firstRoundMatchCount; i++) {
-        const match = firstRoundMatches[i];
-        const seed1 = seedOrder[i * 2];
-        const seed2 = seedOrder[i * 2 + 1];
-        const p1 = participantBySeed.get(seed1);
-        const p2 = participantBySeed.get(seed2);
-        const p1Exists = p1 !== undefined;
-        const p2Exists = p2 !== undefined;
-        if (!p1Exists && !p2Exists) {
-            // Neither participant exists - shouldn't happen
-            match.status = 'pending';
+    const byeAtTop = (round) => round % 2 === 1;
+    const buildInputSlots = (round) => {
+        const matchesInRound = roundCounts[round - 1];
+        const byeInRound = roundByes[round - 1];
+        const realSlots = [];
+        for (let p = 1; p <= matchesInRound; p++) {
+            realSlots.push({ kind: 'matchSlot', round, position: p, slot: 1 });
+            realSlots.push({ kind: 'matchSlot', round, position: p, slot: 2 });
         }
-        else if (p1Exists && !p2Exists) {
-            // P1 exists, P2 doesn't - P1 gets a bye
-            match.participant1 = p1.id;
-            match.participant1Seed = seed1;
-            match.participant2 = null;
-            match.participant2Seed = null;
-            match.winner = p1.id;
-            match.status = 'bye';
-            // Advance winner to next match
-            if (match.nextMatchId) {
-                advanceWinner(matches, match.nextMatchId, match.nextMatchSlot, p1.id, seed1);
-            }
+        if (byeInRound === 1) {
+            return byeAtTop(round)
+                ? [{ kind: 'bye', round }, ...realSlots]
+                : [...realSlots, { kind: 'bye', round }];
         }
-        else if (!p1Exists && p2Exists) {
-            // P2 exists, P1 doesn't - P2 gets a bye
-            match.participant1 = null;
-            match.participant1Seed = null;
-            match.participant2 = p2.id;
-            match.participant2Seed = seed2;
-            match.winner = p2.id;
-            match.status = 'bye';
-            // Advance winner to next match
-            if (match.nextMatchId) {
-                advanceWinner(matches, match.nextMatchId, match.nextMatchSlot, p2.id, seed2);
-            }
+        return realSlots;
+    };
+    const buildOutputs = (round) => {
+        const matchesInRound = roundCounts[round - 1];
+        const byeInRound = roundByes[round - 1];
+        const matchOutputs = [];
+        for (let p = 1; p <= matchesInRound; p++) {
+            matchOutputs.push({ kind: 'matchWinner', round, position: p });
         }
-        else if (p1Exists && p2Exists) {
-            // Normal match
-            match.participant1 = p1?.id ?? null;
-            match.participant1Seed = seed1;
-            match.participant2 = p2?.id ?? null;
-            match.participant2Seed = seed2;
-            match.status = 'ready';
+        if (byeInRound === 1) {
+            return byeAtTop(round)
+                ? [{ kind: 'bye', round }, ...matchOutputs]
+                : [...matchOutputs, { kind: 'bye', round }];
+        }
+        return matchOutputs;
+    };
+    const outputKey = (o) => o.kind === 'matchWinner' ? `m_${o.round}_${o.position}` : `b_${o.round}`;
+    // Map round-R OutputRef → round-(R+1) SlotRef (one step).
+    const outputToSlot = new Map();
+    for (let r = 1; r < totalRounds; r++) {
+        const outs = buildOutputs(r);
+        const slots = buildInputSlots(r + 1);
+        if (outs.length !== slots.length) {
+            throw new Error(`Linking mismatch: round ${r} outputs=${outs.length}, round ${r + 1} slots=${slots.length}`);
+        }
+        for (let i = 0; i < outs.length; i++) {
+            outputToSlot.set(outputKey(outs[i]), slots[i]);
         }
     }
-    // Update status of matches that have both participants filled
+    // Resolve final destination for an output: follow the chain through any
+    // intermediate bye-slots until we land on a real matchSlot (or null at
+    // the bracket's end).
+    const resolveDest = (startOutput) => {
+        let cur = startOutput;
+        while (true) {
+            const slot = outputToSlot.get(outputKey(cur));
+            if (!slot)
+                return null;
+            if (slot.kind === 'matchSlot') {
+                return {
+                    matchId: generateMatchId(tournamentId, 'winners', slot.round, slot.position),
+                    slot: slot.slot,
+                };
+            }
+            // bye slot → follow the bye output chain
+            cur = { kind: 'bye', round: slot.round };
+        }
+    };
+    // Apply nextMatchId/Slot to each match record.
+    for (const m of matches) {
+        if (m.round < totalRounds) {
+            const dest = resolveDest({ kind: 'matchWinner', round: m.round, position: m.position });
+            if (dest) {
+                m.nextMatchId = dest.matchId;
+                m.nextMatchSlot = dest.slot;
+            }
+        }
+    }
+    // === Assign seeds to R1 entry slots ===
+    // Build the list of R1 entry slots top-to-bottom. There are exactly N
+    // entry slots: the R1 bye-slot (if present) plus each R1 match's two
+    // slots in order.
+    const r1Slots = buildInputSlots(1);
+    // r1Slots.length should equal participantCount (= aliveR1).
+    if (r1Slots.length !== participantCount) {
+        throw new Error(`Internal: R1 input slot count ${r1Slots.length} !== participantCount ${participantCount}`);
+    }
+    // Assign seeds 1..N to these slots using the standard SE seed order with
+    // phantoms compressed (drop ranks > N from generateSeedOrder(nextPow2(N))).
+    const compressedOrder = compressedSeedOrder(participantCount);
+    if (compressedOrder.length !== participantCount) {
+        throw new Error('Internal: compressed seed order length mismatch');
+    }
+    for (let i = 0; i < r1Slots.length; i++) {
+        const slot = r1Slots[i];
+        const seed = compressedOrder[i];
+        const participant = participantBySeed.get(seed);
+        if (!participant) {
+            throw new Error(`Missing participant for seed ${seed}`);
+        }
+        if (slot.kind === 'matchSlot') {
+            const targetMatch = matches.find(m => m.round === slot.round && m.position === slot.position);
+            if (!targetMatch)
+                continue;
+            if (slot.slot === 1) {
+                targetMatch.participant1 = participant.id;
+                targetMatch.participant1Seed = seed;
+            }
+            else {
+                targetMatch.participant2 = participant.id;
+                targetMatch.participant2Seed = seed;
+            }
+        }
+        else {
+            // R1 bye-slot: advance the seed directly through the bye chain.
+            const dest = resolveDest({ kind: 'bye', round: 1 });
+            if (dest) {
+                const targetMatch = matches.find(m => m.id === dest.matchId);
+                if (targetMatch) {
+                    if (dest.slot === 1) {
+                        targetMatch.participant1 = participant.id;
+                        targetMatch.participant1Seed = seed;
+                    }
+                    else {
+                        targetMatch.participant2 = participant.id;
+                        targetMatch.participant2Seed = seed;
+                    }
+                }
+            }
+        }
+    }
     updateMatchStatuses(matches);
     return {
         tournamentId,
@@ -110,28 +192,9 @@ export function generateSingleElimination(options) {
         participantCount,
     };
 }
-/**
- * Advance a winner to their next match
- */
-function advanceWinner(matches, nextMatchId, slot, participantId, seed) {
-    const nextMatch = matches.find(m => m.id === nextMatchId);
-    if (!nextMatch)
-        return;
-    if (slot === 1) {
-        nextMatch.participant1 = participantId;
-        nextMatch.participant1Seed = seed;
-    }
-    else {
-        nextMatch.participant2 = participantId;
-        nextMatch.participant2Seed = seed;
-    }
-}
-/**
- * Update match statuses based on participant availability
- */
 function updateMatchStatuses(matches) {
     for (const match of matches) {
-        if (match.status === 'bye' || match.status === 'completed')
+        if (match.status === 'completed' || match.status === 'bye')
             continue;
         if (match.participant1 && match.participant2) {
             match.status = 'ready';
@@ -142,32 +205,40 @@ function updateMatchStatuses(matches) {
     }
 }
 /**
- * Report a match result and advance the winner
+ * Report a match result and advance the winner.
  */
 export function reportMatchResult(bracket, matchId, winnerId) {
-    const matches = [...bracket.matches];
-    const matchIndex = matches.findIndex(m => m.id === matchId);
-    if (matchIndex === -1) {
+    const matches = bracket.matches.map(m => ({ ...m }));
+    const match = matches.find(m => m.id === matchId);
+    if (!match) {
         throw new Error(`Match ${matchId} not found`);
     }
-    const match = { ...matches[matchIndex] };
-    matches[matchIndex] = match;
     if (match.participant1 !== winnerId && match.participant2 !== winnerId) {
         throw new Error(`Winner ${winnerId} is not a participant in match ${matchId}`);
     }
     match.winner = winnerId;
     match.status = 'completed';
-    const winnerSeed = match.participant1 === winnerId
-        ? match.participant1Seed
-        : match.participant2Seed;
-    // Advance winner to next match
+    const winnerSeed = match.participant1 === winnerId ? match.participant1Seed : match.participant2Seed;
     if (match.nextMatchId && winnerSeed !== null) {
-        advanceWinner(matches, match.nextMatchId, match.nextMatchSlot, winnerId, winnerSeed);
-        updateMatchStatuses(matches);
+        advanceToMatch(matches, match.nextMatchId, match.nextMatchSlot, winnerId, winnerSeed);
     }
+    updateMatchStatuses(matches);
     return {
         ...bracket,
         matches,
     };
+}
+function advanceToMatch(matches, matchId, slot, participantId, seed) {
+    const target = matches.find(m => m.id === matchId);
+    if (!target)
+        return;
+    if (slot === 1) {
+        target.participant1 = participantId;
+        target.participant1Seed = seed;
+    }
+    else {
+        target.participant2 = participantId;
+        target.participant2Seed = seed;
+    }
 }
 //# sourceMappingURL=single-elimination.js.map
