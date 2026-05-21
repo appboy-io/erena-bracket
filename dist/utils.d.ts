@@ -73,64 +73,6 @@ export declare function computeRoundByes(playerCount: number): number[];
  */
 export declare function compressedSeedOrder(n: number): number[];
 /**
- * Per-round metadata for the losers bracket of a flow-byes double elimination.
- */
-export interface LosersRoundInfo {
-    /** 1-indexed LB round number. */
-    round: number;
-    /** True if this is a drop-in round (receives WB losers). */
-    isDropIn: boolean;
-    /** Number of advances from previous LB round entering this round. */
-    carryover: number;
-    /** Number of WB losers entering this round (0 for consolidation rounds). */
-    dropIn: number;
-    /** Total players alive entering this round = carryover + dropIn. */
-    alive: number;
-    /** Number of match records in this round = floor(alive / 2). */
-    matches: number;
-    /** 1 if this round has a bye, else 0 (= alive % 2). */
-    byes: number;
-    /** Number of advances out of this round = matches + byes. */
-    advances: number;
-    /**
-     * The WB round whose losers feed this drop-in round (1-indexed).
-     * Null for consolidation rounds.
-     *
-     * Mapping:
-     *   LB R1                → WB R1
-     *   LB R(even)           → WB R(R/2 + 1)
-     *   LB R(odd, > 1)       → null  (consolidation)
-     */
-    wbLoserFeedRound: number | null;
-}
-/**
- * Compute the per-round shape of the LOSERS bracket for a flow-byes double
- * elimination tournament.
- *
- * LB structure:
- *   - Total LB rounds = `2 * (wbRounds - 1)` (0 when wbRounds <= 1).
- *   - LB R1 is a special drop-in round (no previous LB round).
- *     It pairs WB R1 losers with each other; if odd, one byes.
- *   - LB R(even) is a drop-in round: pairs previous LB round advances (carryover)
- *     with WB losers from WB round `R/2 + 1` (drop-in).
- *   - LB R(odd, > 1) is a consolidation round: pairs previous LB advances with
- *     each other; if odd, one byes.
- *
- * Byes are placed via routing (no bye-match record), matching the SE flow-byes
- * approach. Total match records = N - 2 (one fewer than SE's N-1 since the GF
- * absorbs the last elimination, but in our model GF matches are counted
- * separately so this is the LB-only count).
- *
- * For N=13, WB rounds=4 → LB has 6 rounds, shape:
- *   R1: drop-in,    carry=0, drop=6, alive=6, matches=3, byes=0, advances=3
- *   R2: drop-in,    carry=3, drop=3, alive=6, matches=3, byes=0, advances=3
- *   R3: consolidate,carry=3, drop=0, alive=3, matches=1, byes=1, advances=2
- *   R4: drop-in,    carry=2, drop=2, alive=4, matches=2, byes=0, advances=2
- *   R5: consolidate,carry=2, drop=0, alive=2, matches=1, byes=0, advances=1
- *   R6: drop-in,    carry=1, drop=1, alive=2, matches=1, byes=0, advances=1
- */
-export declare function computeLosersBracketShape(playerCount: number): LosersRoundInfo[];
-/**
  * @deprecated — kept for backwards compatibility / experimentation. Use
  * `compressedSeedOrder` for slot-based seeding.
  *
