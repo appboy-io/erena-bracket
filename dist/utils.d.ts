@@ -17,8 +17,8 @@ export declare function generateMatchId(tournamentId: string, bracketType: strin
 /**
  * Generate standard seeding order for a bracket
  * This ensures top seeds meet in later rounds
- * e.g., for 8 participants: [1,8,4,5,2,7,3,6]
- * Results in matchups: 1v8, 4v5, 2v7, 3v6
+ * e.g., for 8 participants: [1,8,5,4,3,6,7,2]
+ * Results in matchups: 1v8, 4v5, 3v6, 2v7
  */
 export declare function generateSeedOrder(bracketSize: number): number[];
 /**
@@ -30,55 +30,6 @@ export declare function generateSeedOrder(bracketSize: number): number[];
  * being paired with these phantom slots, then auto-advancing. Consumers of
  * this set check whether each side of a match is a phantom to decide whether
  * to mark the match as a bye and advance the real player.
- *
- * NOTE: This is the legacy "round up to power of 2" model. The new
- * single-elimination flow-byes generator does NOT use this. It's retained
- * for the double-elimination generator (which has not been migrated yet).
  */
 export declare function assignByes(participantCount: number, bracketSize: number): Set<number>;
-/**
- * Compute matches-per-round for a flow-byes single-elimination bracket.
- *
- * At each round, the alive count is halved (rounding up) by playing
- * `floor(alive / 2)` matches and giving exactly one bye when the count is odd.
- *
- * Examples:
- *   computeRoundCounts(2)  → [1]
- *   computeRoundCounts(3)  → [1, 1]
- *   computeRoundCounts(4)  → [2, 1]
- *   computeRoundCounts(5)  → [2, 1, 1]
- *   computeRoundCounts(8)  → [4, 2, 1]
- *   computeRoundCounts(13) → [6, 3, 2, 1]
- *   computeRoundCounts(17) → [8, 4, 2, 1, 1]
- */
-export declare function computeRoundCounts(playerCount: number): number[];
-/**
- * Compute byes-per-round for a flow-byes single-elimination bracket.
- * Returns an array where entry R-1 is 1 if round R has a bye, else 0.
- *
- * Examples:
- *   computeRoundByes(13) → [1, 1, 0, 0]   (R1, R2 each have 1 bye)
- *   computeRoundByes(17) → [1, 1, 1, 1, 0]
- *   computeRoundByes(8)  → [0, 0, 0]
- */
-export declare function computeRoundByes(playerCount: number): number[];
-/**
- * Compute the top-to-bottom seed ordering for `n` entry slots in a flow-byes
- * SE bracket. Wraps `generateSeedOrder(nextPowerOf2(n))` and drops phantom
- * positions (rank > n), producing a length-n array where index i = the seed
- * assigned to the i-th entry slot top-to-bottom.
- *
- * Example: compressedSeedOrder(13) =
- *   [1, 8, 9, 4, 13, 5, 12, 2, 7, 10, 3, 6, 11]
- */
-export declare function compressedSeedOrder(n: number): number[];
-/**
- * @deprecated — kept for backwards compatibility / experimentation. Use
- * `compressedSeedOrder` for slot-based seeding.
- *
- * Pair `n` players (passed as ranks 1..n where rank 1 = top seed) into
- * `floor(n/2)` R1 matches arranged top-to-bottom in standard SE bracket
- * position order. If `n` is odd, rank 1 byes and is appended to the end.
- */
-export declare function standardRankPairing(n: number): number[];
 //# sourceMappingURL=utils.d.ts.map
