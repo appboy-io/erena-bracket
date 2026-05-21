@@ -2,6 +2,7 @@ export * from './types.js';
 export * from './utils.js';
 export { generateSingleElimination, reportMatchResult } from './single-elimination.js';
 export { generateDoubleElimination, reportDoubleElimMatchResult } from './double-elimination.js';
+export { disqualifyParticipant } from './disqualification.js';
 
 import type { Bracket, BracketGeneratorOptions } from './types.js';
 import { generateSingleElimination } from './single-elimination.js';
