@@ -1,6 +1,6 @@
 export type BracketType = 'winners' | 'losers' | 'grand_final';
 
-export type MatchStatus = 'pending' | 'ready' | 'in_progress' | 'completed' | 'bye';
+export type MatchStatus = 'pending' | 'ready' | 'in_progress' | 'completed' | 'bye' | 'disqualified';
 
 export interface Participant {
   id: string;
