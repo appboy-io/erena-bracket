@@ -1,7 +1,7 @@
 export * from './types.js';
 export * from './utils.js';
 export { generateSingleElimination, reportMatchResult } from './single-elimination.js';
-export { generateDoubleElimination, reportDoubleElimMatchResult } from './double-elimination.js';
+export { generateDoubleElimination, reportDoubleElimMatchResult, propagateByes } from './double-elimination.js';
 import { generateSingleElimination } from './single-elimination.js';
 import { generateDoubleElimination } from './double-elimination.js';
 /**
