@@ -75,6 +75,7 @@ export function generateDoubleElimination(
   linkWinnersToLosers(matches, tournamentId, winnersRounds, bracketSize);
 
   // Update statuses
+  propagateByes(matches);
   updateMatchStatuses(matches);
 
   // Calculate total rounds (winners + losers rounds + grand finals)
@@ -442,6 +443,51 @@ function updateMatchStatuses(matches: Match[]): void {
 }
 
 /**
+ * Resolve "phantom" byes: a match slot can never be filled when its feeder is a
+ * bye (winners-bracket bye → no loser) or a dead double-bye (→ no winner).
+ * - one real player + one phantom slot → that player walks over (status 'bye', advance).
+ * - both slots phantom → the match itself is dead (status 'bye', winner null, advances nobody).
+ * Idempotent; iterates to a fixpoint so cascades resolve. Safe to call repeatedly.
+ */
+export function propagateByes(matches: Match[]): void {
+  type Feeder = { match: Match; kind: 'winner' | 'loser' };
+  const key = (id: string, slot: number) => `${id}#${slot}`;
+  const feeders = new Map<string, Feeder>();
+  for (const m of matches) {
+    if (m.nextMatchId && m.nextMatchSlot) feeders.set(key(m.nextMatchId, m.nextMatchSlot), { match: m, kind: 'winner' });
+    if (m.loserNextMatchId && m.loserNextMatchSlot) feeders.set(key(m.loserNextMatchId, m.loserNextMatchSlot), { match: m, kind: 'loser' });
+  }
+
+  const slotDead = (target: Match, slot: 1 | 2): boolean => {
+    const f = feeders.get(key(target.id, slot));
+    if (!f) return false; // seeded source slot (e.g. winners R1) — never phantom
+    return f.kind === 'loser' ? f.match.status === 'bye' : f.match.status === 'bye' && !f.match.winner;
+  };
+
+  let progressed = true;
+  while (progressed) {
+    progressed = false;
+    for (const m of matches) {
+      if (m.status === 'completed' || m.status === 'bye') continue;
+      const d1 = slotDead(m, 1);
+      const d2 = slotDead(m, 2);
+      if (m.participant1 && d2) {
+        m.status = 'bye'; m.winner = m.participant1;
+        if (m.nextMatchId && m.nextMatchSlot) advanceToMatch(matches, m.nextMatchId, m.nextMatchSlot, m.participant1, m.participant1Seed ?? 0);
+        progressed = true;
+      } else if (m.participant2 && d1) {
+        m.status = 'bye'; m.winner = m.participant2;
+        if (m.nextMatchId && m.nextMatchSlot) advanceToMatch(matches, m.nextMatchId, m.nextMatchSlot, m.participant2, m.participant2Seed ?? 0);
+        progressed = true;
+      } else if (d1 && d2) {
+        m.status = 'bye'; m.winner = null; // dead double-bye
+        progressed = true;
+      }
+    }
+  }
+}
+
+/**
  * Report a match result in double elimination
  */
 export function reportDoubleElimMatchResult(
@@ -499,6 +545,7 @@ export function reportDoubleElimMatchResult(
     advanceToMatch(matches, match.loserNextMatchId, match.loserNextMatchSlot!, loserId, loserSeed);
   }
 
+  propagateByes(matches);
   updateMatchStatuses(matches);
 
   return {

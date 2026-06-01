@@ -247,3 +247,36 @@ describe('reportDoubleElimMatchResult', () => {
     expect(gf2.participant2).toBe('player_2'); // GF1 winner
   });
 });
+
+// Plays every 'ready' match (participant1 always wins) until none remain.
+function playOut(bracket: ReturnType<typeof generateDoubleElimination>) {
+  let current = bracket;
+  let guard = 0;
+  while (guard++ < 1000) {
+    const ready = current.matches.find(
+      m => m.status === 'ready' && m.participant1 && m.participant2 && !m.winner
+    );
+    if (!ready) break;
+    current = reportDoubleElimMatchResult(current, ready.id, ready.participant1!);
+  }
+  return current;
+}
+
+describe('byes flow through the losers bracket', () => {
+  for (const count of [10, 12]) {
+    it(`completes a ${count}-player double-elim without deadlocking`, () => {
+      const bracket = playOut(
+        generateDoubleElimination({ tournamentId: 't', participants: createParticipants(count) })
+      );
+      const gf1 = bracket.matches.find(m => m.bracketType === 'grand_final' && m.round === 1);
+      const gf2 = bracket.matches.find(m => m.bracketType === 'grand_final' && m.round === 2);
+      expect(gf1?.winner, 'grand final never resolved → losers bracket deadlocked').toBeTruthy();
+      expect(gf2?.status === 'bye' || gf2?.status === 'completed').toBe(true);
+      const stuck = bracket.matches.filter(
+        m => m.bracketType === 'losers' && m.status !== 'completed' && m.status !== 'bye'
+          && ((!!m.participant1) !== (!!m.participant2))
+      );
+      expect(stuck, `stuck losers matches: ${stuck.map(s => s.id).join(', ')}`).toHaveLength(0);
+    });
+  }
+});
