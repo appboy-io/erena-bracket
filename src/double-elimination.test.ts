@@ -302,6 +302,37 @@ describe('losers bracket rematch avoidance', () => {
 		});
 		assertNoEarlyRematch(bracket.matches);
 	});
+
+	it.each([4, 8, 16, 32])('holds the invariant for %i players (power of two)', (n) => {
+		const bracket = generateDoubleElimination({
+			tournamentId: 'test',
+			participants: createParticipants(n),
+		});
+		assertNoEarlyRematch(bracket.matches);
+	});
+
+	it('holds the invariant with byes (17 players -> size 32, g-league shape)', () => {
+		const bracket = generateDoubleElimination({
+			tournamentId: 'test',
+			participants: createParticipants(17),
+		});
+		assertNoEarlyRematch(bracket.matches);
+	});
+
+	it('WR2M1 loser is not routed into the LB match fed by WR1M1/WR1M2 (g-league)', () => {
+		const bracket = generateDoubleElimination({
+			tournamentId: 'test',
+			participants: createParticipants(16),
+		});
+		const wr2m1 = bracket.matches.find(
+			(m) => m.bracketType === 'winners' && m.round === 2 && m.position === 1
+		)!;
+		const target = wr2m1.loserNextMatchId!;
+		const forbidden = new Set(['test_WR1M1', 'test_WR1M2']);
+		const sitting = winnersAncestry(bracket.matches, target, 1);
+		const clash = [...sitting].filter((id) => forbidden.has(id));
+		expect(clash, `WR2M1 loser drops against ${clash.join(',')}`).toEqual([]);
+	});
 });
 
 // Plays every 'ready' match (participant1 always wins) until none remain.
