@@ -323,6 +323,27 @@ function generateGrandFinals(
   }
 }
 
+// Winners-bracket match IDs that can reach (matchId, slot) via any feed path.
+// Used to place WB losers opposite players they haven't met.
+function winnersAncestry(matches: Match[], matchId: string, slot: 1 | 2): Set<string> {
+	const acc = new Set<string>();
+	const feeders = matches.filter(
+		(m) =>
+			(m.nextMatchId === matchId && m.nextMatchSlot === slot) ||
+			(m.loserNextMatchId === matchId && m.loserNextMatchSlot === slot)
+	);
+	for (const f of feeders) {
+		if (f.bracketType === 'winners') {
+			acc.add(f.id);
+		} else {
+			for (const s of [1, 2] as const) {
+				for (const id of winnersAncestry(matches, f.id, s)) acc.add(id);
+			}
+		}
+	}
+	return acc;
+}
+
 function linkWinnersToLosers(
   matches: Match[],
   tournamentId: string,
@@ -368,6 +389,31 @@ function linkWinnersToLosers(
     const losersMatches = matches.filter(
       m => m.bracketType === 'losers' && m.round === losersRound
     );
+
+		if (wRound >= 2) {
+			// Ancestry-disjoint drop: each WB round-r loser (slot 2) is placed into a
+			// losers match whose sitting player (slot 1) came from a different WB path,
+			// so the two never met. Winners rounds are linked in increasing order, so by
+			// the time round r is placed, all earlier drops (and thus slot-1 ancestries)
+			// are already set.
+			const sortedLosers = [...losersMatches].sort((a, b) => a.position - b.position);
+			const sittingAncestry = sortedLosers.map((lm) => winnersAncestry(matches, lm.id, 1));
+			const used = new Set<number>();
+			const sortedWinners = [...winnersMatches].sort((a, b) => a.position - b.position);
+			for (const wm of sortedWinners) {
+				const own = new Set<string>([wm.id]);
+				for (const s of [1, 2] as const)
+					for (const id of winnersAncestry(matches, wm.id, s)) own.add(id);
+				let chosen = sortedLosers.findIndex(
+					(_, p) => !used.has(p) && ![...sittingAncestry[p]].some((id) => own.has(id))
+				);
+				if (chosen === -1) chosen = sortedLosers.findIndex((_, p) => !used.has(p));
+				used.add(chosen);
+				wm.loserNextMatchId = sortedLosers[chosen].id;
+				wm.loserNextMatchSlot = 2;
+			}
+			continue; // whole round handled; skip the per-match loop below
+		}
 
     // Link winners matches to losers matches
     for (let i = 0; i < winnersMatches.length; i++) {
