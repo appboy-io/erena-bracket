@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateDoubleElimination, reportDoubleElimMatchResult } from './double-elimination.js';
-import type { Match, Participant } from './types.js';
+import type { Bracket, Match, Participant } from './types.js';
 
 function createParticipants(count: number): Participant[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -269,69 +269,90 @@ function winnersAncestry(matches: Match[], matchId: string, slot: 1 | 2): Set<st
 	return acc;
 }
 
-// Asserts no "double jeopardy": for every WB round-r loser drop (r = 2 .. winnersRounds-1),
-// the losers match it drops into must have a slot-1 (sitting) player whose winners-bracket
-// history does NOT include any winners match the dropping player was in. The final WB->LB
-// drop (WB finals loser -> LB final) is excluded because a rematch there is forced.
-function assertNoEarlyRematch(matches: Match[]): void {
-	const winnersRounds = Math.max(
-		...matches.filter((m) => m.bracketType === 'winners').map((m) => m.round)
-	);
-	const drops = matches.filter(
-		(m) => m.bracketType === 'winners' && m.round >= 2 && m.round <= winnersRounds - 1
-	);
-	for (const m of drops) {
-		expect(m.loserNextMatchId, `WB ${m.round}/${m.position} has no loser target`).toBeTruthy();
-		const own = new Set<string>([m.id]);
-		for (const s of [1, 2] as const)
-			for (const id of winnersAncestry(matches, m.id, s)) own.add(id);
-		const sitting = winnersAncestry(matches, m.loserNextMatchId!, 1);
-		const overlap = [...own].filter((id) => sitting.has(id));
-		expect(
-			overlap,
-			`double jeopardy: WB ${m.round}/${m.position} loser dropped against its own WB path (${overlap.join(',')})`
-		).toEqual([]);
+// Deterministic PRNG so simulated tournaments are reproducible.
+function mulberry32(a: number): () => number {
+	return () => {
+		a |= 0;
+		a = (a + 0x6d2b79f5) | 0;
+		let t = Math.imul(a ^ (a >>> 15), 1 | a);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+// Play a full random tournament and return the earliest losers-bracket round in
+// which two players who already met in the winners bracket are paired again
+// (Infinity if it never happens). This is the real correctness oracle: a correct
+// crossover pushes any such rematch to the latest round the structure allows.
+function earliestWinnersRematchInLosers(bracket: Bracket, seed: number): number {
+	let b: Bracket = { ...bracket, matches: bracket.matches.map((m) => ({ ...m })) };
+	const rnd = mulberry32(seed);
+	const met: Record<string, { bt: string; round: number }[]> = {};
+	for (let guard = 0; guard < 5000; guard++) {
+		const playable = b.matches.filter(
+			(m) => m.participant1 && m.participant2 && m.status !== 'completed' && m.status !== 'bye'
+		);
+		if (playable.length === 0) break;
+		const m = playable[0]!;
+		const key = [m.participant1, m.participant2].sort().join('|');
+		(met[key] = met[key] || []).push({ bt: m.bracketType, round: m.round });
+		b = reportDoubleElimMatchResult(b, m.id, rnd() < 0.5 ? m.participant1! : m.participant2!);
 	}
+	let earliest = Infinity;
+	for (const list of Object.values(met)) {
+		if (list.length < 2 || !list.some((x) => x.bt === 'winners')) continue;
+		for (const l of list.filter((x) => x.bt === 'losers')) earliest = Math.min(earliest, l.round);
+	}
+	return earliest;
 }
 
 describe('losers bracket rematch avoidance', () => {
-	it('never drops a WB loser into a losers match fed by its own WB path (8 players)', () => {
-		const bracket = generateDoubleElimination({
-			tournamentId: 'test',
-			participants: createParticipants(8),
-		});
-		assertNoEarlyRematch(bracket.matches);
+	// Two players who met in winners can only be *forced* to meet again in the losers
+	// bracket at round log2(bracketSize) at the earliest (start.gg-optimal). Assert no
+	// random tournament produces a rematch before that floor — for power-of-two sizes...
+	it.each([
+		[4, 4],
+		[8, 8],
+		[16, 16],
+		[32, 32],
+		[64, 64],
+	])('players=%i: no losers rematch before the LR%i floor', (n, bracketSize) => {
+		const floor = Math.log2(bracketSize);
+		const bracket = generateDoubleElimination({ tournamentId: 'test', participants: createParticipants(n) });
+		let minRound = Infinity;
+		for (let seed = 1; seed <= 200; seed++) {
+			minRound = Math.min(minRound, earliestWinnersRematchInLosers(bracket, seed));
+		}
+		expect(minRound, `earliest losers rematch LR${minRound} < floor LR${floor}`).toBeGreaterThanOrEqual(floor);
 	});
 
-	it.each([4, 8, 16, 32])('holds the invariant for %i players (power of two)', (n) => {
-		const bracket = generateDoubleElimination({
-			tournamentId: 'test',
-			participants: createParticipants(n),
-		});
-		assertNoEarlyRematch(bracket.matches);
+	// ...and for odd/bye brackets (players not a power of two), which must respect the
+	// same floor for their padded bracket size.
+	it.each([
+		[6, 8],
+		[12, 16],
+		[17, 32],
+		[24, 32],
+	])('byes: players=%i respect the LR%i floor', (n, bracketSize) => {
+		const floor = Math.log2(bracketSize);
+		const bracket = generateDoubleElimination({ tournamentId: 'test', participants: createParticipants(n) });
+		let minRound = Infinity;
+		for (let seed = 1; seed <= 200; seed++) {
+			minRound = Math.min(minRound, earliestWinnersRematchInLosers(bracket, seed));
+		}
+		expect(minRound, `earliest losers rematch LR${minRound} < floor LR${floor}`).toBeGreaterThanOrEqual(floor);
 	});
 
-	it('holds the invariant with byes (17 players -> size 32, g-league shape)', () => {
-		const bracket = generateDoubleElimination({
-			tournamentId: 'test',
-			participants: createParticipants(17),
-		});
-		assertNoEarlyRematch(bracket.matches);
-	});
-
-	it('WR2M1 loser is not routed into the LB match fed by WR1M1/WR1M2 (g-league)', () => {
-		const bracket = generateDoubleElimination({
-			tournamentId: 'test',
-			participants: createParticipants(16),
-		});
+	// The reported g-league case: a WR2 loser must not land immediately against a player
+	// from its own WR1 match (the original double jeopardy).
+	it('g-league regression: WR2 loser not immediately re-paired against its own WR1 opponent', () => {
+		const bracket = generateDoubleElimination({ tournamentId: 'test', participants: createParticipants(16) });
 		const wr2m1 = bracket.matches.find(
 			(m) => m.bracketType === 'winners' && m.round === 2 && m.position === 1
 		)!;
-		const target = wr2m1.loserNextMatchId!;
-		const forbidden = new Set(['test_WR1M1', 'test_WR1M2']);
-		const sitting = winnersAncestry(bracket.matches, target, 1);
-		const clash = [...sitting].filter((id) => forbidden.has(id));
-		expect(clash, `WR2M1 loser drops against ${clash.join(',')}`).toEqual([]);
+		const sitting = winnersAncestry(bracket.matches, wr2m1.loserNextMatchId!, 1);
+		const clash = [...sitting].filter((id) => id === 'test_WR1M1' || id === 'test_WR1M2');
+		expect(clash, `WR2M1 loser drops immediately against ${clash.join(',')}`).toEqual([]);
 	});
 });
 

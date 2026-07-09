@@ -323,27 +323,6 @@ function generateGrandFinals(
   }
 }
 
-// Winners-bracket match IDs that can reach (matchId, slot) via any feed path.
-// Used to place WB losers opposite players they haven't met.
-function winnersAncestry(matches: Match[], matchId: string, slot: 1 | 2): Set<string> {
-	const acc = new Set<string>();
-	const feeders = matches.filter(
-		(m) =>
-			(m.nextMatchId === matchId && m.nextMatchSlot === slot) ||
-			(m.loserNextMatchId === matchId && m.loserNextMatchSlot === slot)
-	);
-	for (const f of feeders) {
-		if (f.bracketType === 'winners') {
-			acc.add(f.id);
-		} else {
-			for (const s of [1, 2] as const) {
-				for (const id of winnersAncestry(matches, f.id, s)) acc.add(id);
-			}
-		}
-	}
-	return acc;
-}
-
 function linkWinnersToLosers(
   matches: Match[],
   tournamentId: string,
@@ -391,27 +370,28 @@ function linkWinnersToLosers(
     );
 
 		if (wRound >= 2) {
-			// Ancestry-disjoint drop: each WB round-r loser (slot 2) is placed into a
-			// losers match whose sitting player (slot 1) came from a different WB path,
-			// so the two never met. Winners rounds are linked in increasing order, so by
-			// the time round r is placed, all earlier drops (and thus slot-1 ancestries)
-			// are already set.
-			const sortedLosers = [...losersMatches].sort((a, b) => a.position - b.position);
-			const sittingAncestry = sortedLosers.map((lm) => winnersAncestry(matches, lm.id, 1));
-			const used = new Set<number>();
-			const sortedWinners = [...winnersMatches].sort((a, b) => a.position - b.position);
-			for (const wm of sortedWinners) {
-				const own = new Set<string>([wm.id]);
-				for (const s of [1, 2] as const)
-					for (const id of winnersAncestry(matches, wm.id, s)) own.add(id);
-				let chosen = sortedLosers.findIndex(
-					(_, p) => !used.has(p) && ![...sittingAncestry[p]!].some((id) => own.has(id))
-				);
-				if (chosen === -1) chosen = sortedLosers.findIndex((_, p) => !used.has(p));
-				used.add(chosen);
-				wm.loserNextMatchId = sortedLosers[chosen]!.id;
+			// Standard crossover drop: WB round-r losers (slot 2) are placed into the
+			// round's losers seats using an ALTERNATING permutation — full reversal on
+			// even winners rounds, half-swap on odd ones. This is the classic double-elim
+			// seeding: it pushes any rematch of two players who met in winners to the
+			// latest round the bracket structurally allows (earliest possible rematch =
+			// log2(bracketSize) losers round), matching start.gg. Simple reversal or a
+			// single half-swap alone is not optimal for brackets of 32+.
+			const seats = [...losersMatches].sort((a, b) => a.position - b.position);
+			const c = seats.length;
+			const droppers = [...winnersMatches].sort((a, b) => a.position - b.position);
+			droppers.forEach((wm, i) => {
+				const pos = i + 1; // 1-based dropper position
+				let seatIndex: number;
+				if (wRound % 2 === 0) {
+					seatIndex = c - pos; // full reversal (0-based)
+				} else {
+					const h = c / 2; // half-swap
+					seatIndex = (pos <= h ? pos + h : pos - h) - 1;
+				}
+				wm.loserNextMatchId = seats[seatIndex]!.id;
 				wm.loserNextMatchSlot = 2;
-			}
+			});
 			continue; // whole round handled; skip the per-match loop below
 		}
 
