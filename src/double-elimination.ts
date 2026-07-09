@@ -405,11 +405,11 @@ function linkWinnersToLosers(
 				for (const s of [1, 2] as const)
 					for (const id of winnersAncestry(matches, wm.id, s)) own.add(id);
 				let chosen = sortedLosers.findIndex(
-					(_, p) => !used.has(p) && ![...sittingAncestry[p]].some((id) => own.has(id))
+					(_, p) => !used.has(p) && ![...sittingAncestry[p]!].some((id) => own.has(id))
 				);
 				if (chosen === -1) chosen = sortedLosers.findIndex((_, p) => !used.has(p));
 				used.add(chosen);
-				wm.loserNextMatchId = sortedLosers[chosen].id;
+				wm.loserNextMatchId = sortedLosers[chosen]!.id;
 				wm.loserNextMatchSlot = 2;
 			}
 			continue; // whole round handled; skip the per-match loop below

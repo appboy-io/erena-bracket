@@ -177,6 +177,78 @@ describe('reportDoubleElimMatchResult', () => {
         expect(gf2.participant2).toBe('player_2'); // GF1 winner
     });
 });
+// Winners-bracket match IDs that can reach (matchId, slot) by any feed path.
+// Independent re-implementation used only to verify the library's output.
+function winnersAncestry(matches, matchId, slot) {
+    const acc = new Set();
+    const feeders = matches.filter((m) => (m.nextMatchId === matchId && m.nextMatchSlot === slot) ||
+        (m.loserNextMatchId === matchId && m.loserNextMatchSlot === slot));
+    for (const f of feeders) {
+        if (f.bracketType === 'winners') {
+            acc.add(f.id);
+        }
+        else {
+            for (const s of [1, 2]) {
+                for (const id of winnersAncestry(matches, f.id, s))
+                    acc.add(id);
+            }
+        }
+    }
+    return acc;
+}
+// Asserts no "double jeopardy": for every WB round-r loser drop (r = 2 .. winnersRounds-1),
+// the losers match it drops into must have a slot-1 (sitting) player whose winners-bracket
+// history does NOT include any winners match the dropping player was in. The final WB->LB
+// drop (WB finals loser -> LB final) is excluded because a rematch there is forced.
+function assertNoEarlyRematch(matches) {
+    const winnersRounds = Math.max(...matches.filter((m) => m.bracketType === 'winners').map((m) => m.round));
+    const drops = matches.filter((m) => m.bracketType === 'winners' && m.round >= 2 && m.round <= winnersRounds - 1);
+    for (const m of drops) {
+        expect(m.loserNextMatchId, `WB ${m.round}/${m.position} has no loser target`).toBeTruthy();
+        const own = new Set([m.id]);
+        for (const s of [1, 2])
+            for (const id of winnersAncestry(matches, m.id, s))
+                own.add(id);
+        const sitting = winnersAncestry(matches, m.loserNextMatchId, 1);
+        const overlap = [...own].filter((id) => sitting.has(id));
+        expect(overlap, `double jeopardy: WB ${m.round}/${m.position} loser dropped against its own WB path (${overlap.join(',')})`).toEqual([]);
+    }
+}
+describe('losers bracket rematch avoidance', () => {
+    it('never drops a WB loser into a losers match fed by its own WB path (8 players)', () => {
+        const bracket = generateDoubleElimination({
+            tournamentId: 'test',
+            participants: createParticipants(8),
+        });
+        assertNoEarlyRematch(bracket.matches);
+    });
+    it.each([4, 8, 16, 32])('holds the invariant for %i players (power of two)', (n) => {
+        const bracket = generateDoubleElimination({
+            tournamentId: 'test',
+            participants: createParticipants(n),
+        });
+        assertNoEarlyRematch(bracket.matches);
+    });
+    it('holds the invariant with byes (17 players -> size 32, g-league shape)', () => {
+        const bracket = generateDoubleElimination({
+            tournamentId: 'test',
+            participants: createParticipants(17),
+        });
+        assertNoEarlyRematch(bracket.matches);
+    });
+    it('WR2M1 loser is not routed into the LB match fed by WR1M1/WR1M2 (g-league)', () => {
+        const bracket = generateDoubleElimination({
+            tournamentId: 'test',
+            participants: createParticipants(16),
+        });
+        const wr2m1 = bracket.matches.find((m) => m.bracketType === 'winners' && m.round === 2 && m.position === 1);
+        const target = wr2m1.loserNextMatchId;
+        const forbidden = new Set(['test_WR1M1', 'test_WR1M2']);
+        const sitting = winnersAncestry(bracket.matches, target, 1);
+        const clash = [...sitting].filter((id) => forbidden.has(id));
+        expect(clash, `WR2M1 loser drops against ${clash.join(',')}`).toEqual([]);
+    });
+});
 // Plays every 'ready' match (participant1 always wins) until none remain.
 function playOut(bracket) {
     let current = bracket;
