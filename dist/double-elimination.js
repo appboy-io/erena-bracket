@@ -1,4 +1,4 @@
-import { nextPowerOf2, calculateRounds, generateMatchId, generateSeedOrder, assignByes, } from './utils.js';
+import { nextPowerOf2, calculateRounds, generateMatchId, slotsFromSeeding, } from './utils.js';
 /**
  * Generate a double elimination bracket
  *
@@ -9,22 +9,23 @@ import { nextPowerOf2, calculateRounds, generateMatchId, generateSeedOrder, assi
  */
 export function generateDoubleElimination(options) {
     const { tournamentId, participants, grandFinalReset = true } = options;
-    const participantCount = participants.length;
-    if (participantCount < 2) {
+    if (participants.length < 2) {
         throw new Error('Need at least 2 participants for a bracket');
     }
-    const bracketSize = nextPowerOf2(participantCount);
+    const bracketSize = nextPowerOf2(participants.length);
+    const slots = slotsFromSeeding(participants, bracketSize);
+    return buildDoubleElimination(tournamentId, slots, grandFinalReset);
+}
+/** Build a double-elim bracket (winners + losers + grand final) from an explicit
+ *  round-1 slot array (length must be a power of two). slots[i] is the
+ *  participant in round-1 slot i, or null (bye). */
+export function buildDoubleElimination(tournamentId, slots, grandFinalReset = true) {
+    const bracketSize = slots.length;
     const winnersRounds = calculateRounds(bracketSize);
-    const seedOrder = generateSeedOrder(bracketSize);
-    const byeSeeds = assignByes(participantCount, bracketSize);
-    // Create participant lookup by seed
-    const participantBySeed = new Map();
-    for (const p of participants) {
-        participantBySeed.set(p.seed, p);
-    }
+    const realCount = slots.filter((s) => s !== null).length;
     const matches = [];
     // Generate Winners Bracket
-    generateWinnersBracket(matches, tournamentId, bracketSize, winnersRounds, seedOrder, byeSeeds, participantBySeed);
+    generateWinnersBracket(matches, tournamentId, bracketSize, winnersRounds, slots);
     // Generate Losers Bracket
     generateLosersBracket(matches, tournamentId, bracketSize, winnersRounds);
     // Generate Grand Finals
@@ -42,10 +43,10 @@ export function generateDoubleElimination(options) {
         format: 'double_elim',
         matches,
         totalRounds,
-        participantCount,
+        participantCount: realCount,
     };
 }
-function generateWinnersBracket(matches, tournamentId, bracketSize, totalRounds, seedOrder, byeSeeds, participantBySeed) {
+function generateWinnersBracket(matches, tournamentId, bracketSize, totalRounds, slots) {
     // Generate all rounds
     for (let round = 1; round <= totalRounds; round++) {
         const matchesInRound = bracketSize / Math.pow(2, round);
@@ -81,37 +82,34 @@ function generateWinnersBracket(matches, tournamentId, bracketSize, totalRounds,
     const firstRoundMatches = matches.filter(m => m.round === 1 && m.bracketType === 'winners');
     for (let i = 0; i < firstRoundMatches.length; i++) {
         const match = firstRoundMatches[i];
-        const seed1 = seedOrder[i * 2];
-        const seed2 = seedOrder[i * 2 + 1];
-        const p1 = participantBySeed.get(seed1);
-        const p2 = participantBySeed.get(seed2);
-        const p1HasBye = byeSeeds.has(seed1);
-        const p2HasBye = byeSeeds.has(seed2);
-        if (p1HasBye && !p2HasBye) {
-            match.participant2 = p2?.id ?? null;
-            match.participant2Seed = seed2;
-            match.winner = p2?.id ?? null;
+        const p1 = slots[i * 2] ?? undefined;
+        const p2 = slots[i * 2 + 1] ?? undefined;
+        if (p1 && !p2) {
+            match.participant1 = p1.id;
+            match.participant1Seed = p1.seed;
+            match.winner = p1.id;
             match.status = 'bye';
-            if (match.nextMatchId && p2) {
-                advanceToMatch(matches, match.nextMatchId, match.nextMatchSlot, p2.id, seed2);
+            if (match.nextMatchId) {
+                advanceToMatch(matches, match.nextMatchId, match.nextMatchSlot, p1.id, p1.seed);
             }
         }
-        else if (p2HasBye && !p1HasBye) {
-            match.participant1 = p1?.id ?? null;
-            match.participant1Seed = seed1;
-            match.winner = p1?.id ?? null;
+        else if (p2 && !p1) {
+            match.participant2 = p2.id;
+            match.participant2Seed = p2.seed;
+            match.winner = p2.id;
             match.status = 'bye';
-            if (match.nextMatchId && p1) {
-                advanceToMatch(matches, match.nextMatchId, match.nextMatchSlot, p1.id, seed1);
+            if (match.nextMatchId) {
+                advanceToMatch(matches, match.nextMatchId, match.nextMatchSlot, p2.id, p2.seed);
             }
         }
-        else if (!p1HasBye && !p2HasBye) {
-            match.participant1 = p1?.id ?? null;
-            match.participant1Seed = seed1;
-            match.participant2 = p2?.id ?? null;
-            match.participant2Seed = seed2;
+        else if (p1 && p2) {
+            match.participant1 = p1.id;
+            match.participant1Seed = p1.seed;
+            match.participant2 = p2.id;
+            match.participant2Seed = p2.seed;
             match.status = 'ready';
         }
+        // both null: leave pending (dead slot)
     }
 }
 function generateLosersBracket(matches, tournamentId, bracketSize, winnersRounds) {

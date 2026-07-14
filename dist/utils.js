@@ -65,4 +65,13 @@ export function assignByes(participantCount, bracketSize) {
     }
     return byeSeeds;
 }
+/** Map participants (by their .seed) into an explicit slot array of length
+ *  bracketSize using the standard seed order. Missing seeds become null (byes). */
+export function slotsFromSeeding(participants, bracketSize) {
+    const seedOrder = generateSeedOrder(bracketSize);
+    const bySeed = new Map();
+    for (const p of participants)
+        bySeed.set(p.seed, p);
+    return seedOrder.map((seed) => bySeed.get(seed) ?? null);
+}
 //# sourceMappingURL=utils.js.map

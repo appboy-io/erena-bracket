@@ -7,6 +7,9 @@ export interface SingleEliminationOptions {
  * Generate a single elimination bracket
  */
 export declare function generateSingleElimination(options: SingleEliminationOptions): Bracket;
+/** Build a single-elim bracket from an explicit slot array (length must be a
+ *  power of two). slots[i] is the participant in round-1 slot i, or null (bye). */
+export declare function buildSingleElimination(tournamentId: string, slots: (Participant | null)[]): Bracket;
 /**
  * Report a match result and advance the winner
  */

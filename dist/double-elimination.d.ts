@@ -13,6 +13,10 @@ export interface DoubleEliminationOptions {
  * - Grand finals: Winners bracket winner vs Losers bracket winner
  */
 export declare function generateDoubleElimination(options: DoubleEliminationOptions): Bracket;
+/** Build a double-elim bracket (winners + losers + grand final) from an explicit
+ *  round-1 slot array (length must be a power of two). slots[i] is the
+ *  participant in round-1 slot i, or null (bye). */
+export declare function buildDoubleElimination(tournamentId: string, slots: (Participant | null)[], grandFinalReset?: boolean): Bracket;
 /**
  * Resolve "phantom" byes: a match slot can never be filled when its feeder is a
  * bye (winners-bracket bye → no loser) or a dead double-bye (→ no winner).

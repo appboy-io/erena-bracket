@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateDoubleElimination, reportDoubleElimMatchResult } from './double-elimination.js';
+import { generateDoubleElimination, reportDoubleElimMatchResult, buildDoubleElimination } from './double-elimination.js';
+import { slotsFromSeeding } from './utils.js';
 function createParticipants(count) {
     return Array.from({ length: count }, (_, i) => ({
         id: `player_${i + 1}`,
@@ -302,5 +303,29 @@ describe('byes flow through the losers bracket', () => {
             expect(stuck, `stuck losers matches: ${stuck.map(s => s.id).join(', ')}`).toHaveLength(0);
         });
     }
+});
+function pd(n) {
+    return Array.from({ length: n }, (_, i) => ({ id: `p${i + 1}`, seed: i + 1, name: `P${i + 1}` }));
+}
+describe('buildDoubleElimination matches generateDoubleElimination', () => {
+    it.each([[4], [8], [12], [16], [17]])('identical output for %i players', (n) => {
+        const parts = pd(n);
+        const viaSeeds = generateDoubleElimination({ tournamentId: 't', participants: parts });
+        const slots = slotsFromSeeding(parts, /* bracketSize */ Math.pow(2, Math.ceil(Math.log2(n))));
+        const viaSlots = buildDoubleElimination('t', slots);
+        expect(viaSlots.matches).toEqual(viaSeeds.matches);
+    });
+    it('honours an arbitrary round-1 arrangement (bye not on the top seed)', () => {
+        const three = pd(3);
+        const a = three[0], b = three[1], c = three[2];
+        // 3 players in 4 slots; put the bye in slot 2 so player b (slot pair) advances
+        const bracket = buildDoubleElimination('t', [a, b, c, null]);
+        const wr1 = bracket.matches
+            .filter((m) => m.bracketType === 'winners' && m.round === 1)
+            .sort((x, y) => x.position - y.position);
+        expect(wr1[0].status).toBe('ready'); // a vs b
+        expect(wr1[1].status).toBe('bye'); // c vs (bye) -> c advances
+        expect(wr1[1].winner).toBe('p3');
+    });
 });
 //# sourceMappingURL=double-elimination.test.js.map

@@ -1,3 +1,4 @@
+import type { Participant } from './types.js';
 /**
  * Get the next power of 2 >= n
  */
@@ -32,4 +33,7 @@ export declare function generateSeedOrder(bracketSize: number): number[];
  * to mark the match as a bye and advance the real player.
  */
 export declare function assignByes(participantCount: number, bracketSize: number): Set<number>;
+/** Map participants (by their .seed) into an explicit slot array of length
+ *  bracketSize using the standard seed order. Missing seeds become null (byes). */
+export declare function slotsFromSeeding(participants: Participant[], bracketSize: number): (Participant | null)[];
 //# sourceMappingURL=utils.d.ts.map

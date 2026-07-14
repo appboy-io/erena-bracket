@@ -1,9 +1,9 @@
 export * from './types.js';
 export * from './utils.js';
-export { generateSingleElimination, reportMatchResult } from './single-elimination.js';
-export { generateDoubleElimination, reportDoubleElimMatchResult, propagateByes } from './double-elimination.js';
-import { generateSingleElimination } from './single-elimination.js';
-import { generateDoubleElimination } from './double-elimination.js';
+export { generateSingleElimination, reportMatchResult, buildSingleElimination } from './single-elimination.js';
+export { generateDoubleElimination, reportDoubleElimMatchResult, propagateByes, buildDoubleElimination, } from './double-elimination.js';
+import { generateSingleElimination, buildSingleElimination } from './single-elimination.js';
+import { generateDoubleElimination, buildDoubleElimination } from './double-elimination.js';
 /**
  * Generate a tournament bracket
  */
@@ -16,5 +16,19 @@ export function generateBracket(options) {
         return generateDoubleElimination({ tournamentId, participants });
     }
     throw new Error(`Unsupported bracket format: ${format}`);
+}
+/**
+ * Generate a tournament bracket from an explicit, arbitrary round-1 slot
+ * arrangement rather than from a seeded participant list. Enables
+ * start.gg-style on-bracket seeding editing.
+ */
+export function generateFromArrangement(options) {
+    const { tournamentId, format, slots } = options;
+    if ((slots.length & (slots.length - 1)) !== 0 || slots.length < 2) {
+        throw new Error('slots length must be a power of two >= 2');
+    }
+    return format === 'double_elim'
+        ? buildDoubleElimination(tournamentId, slots)
+        : buildSingleElimination(tournamentId, slots);
 }
 //# sourceMappingURL=index.js.map
