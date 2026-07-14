@@ -3,8 +3,7 @@ import {
   nextPowerOf2,
   calculateRounds,
   generateMatchId,
-  generateSeedOrder,
-  assignByes,
+  slotsFromSeeding,
 } from './utils.js';
 
 export interface SingleEliminationOptions {
@@ -15,131 +14,69 @@ export interface SingleEliminationOptions {
 /**
  * Generate a single elimination bracket
  */
-export function generateSingleElimination(
-  options: SingleEliminationOptions
-): Bracket {
+export function generateSingleElimination(options: SingleEliminationOptions): Bracket {
   const { tournamentId, participants } = options;
-  const participantCount = participants.length;
-
-  if (participantCount < 2) {
+  if (participants.length < 2) {
     throw new Error('Need at least 2 participants for a bracket');
   }
+  const bracketSize = nextPowerOf2(participants.length);
+  const slots = slotsFromSeeding(participants, bracketSize);
+  return buildSingleElimination(tournamentId, slots);
+}
 
-  const bracketSize = nextPowerOf2(participantCount);
+/** Build a single-elim bracket from an explicit slot array (length must be a
+ *  power of two). slots[i] is the participant in round-1 slot i, or null (bye). */
+export function buildSingleElimination(
+  tournamentId: string,
+  slots: (Participant | null)[]
+): Bracket {
+  const bracketSize = slots.length;
   const totalRounds = calculateRounds(bracketSize);
-  const seedOrder = generateSeedOrder(bracketSize);
-  const byeSeeds = assignByes(participantCount, bracketSize);
-
-  // Create participant lookup by seed
-  const participantBySeed = new Map<number, Participant>();
-  for (const p of participants) {
-    participantBySeed.set(p.seed, p);
-  }
+  const realCount = slots.filter((s): s is Participant => s !== null).length;
 
   const matches: Match[] = [];
-
-  // Generate all rounds
   for (let round = 1; round <= totalRounds; round++) {
     const matchesInRound = bracketSize / Math.pow(2, round);
-
     for (let position = 1; position <= matchesInRound; position++) {
       const matchId = generateMatchId(tournamentId, 'winners', round, position);
-
-      // Calculate next match info
       let nextMatchId: string | null = null;
       let nextMatchSlot: 1 | 2 | null = null;
-
       if (round < totalRounds) {
         const nextPosition = Math.ceil(position / 2);
         nextMatchId = generateMatchId(tournamentId, 'winners', round + 1, nextPosition);
         nextMatchSlot = position % 2 === 1 ? 1 : 2;
       }
-
-      const match: Match = {
-        id: matchId,
-        round,
-        position,
-        bracketType: 'winners',
-        participant1: null,
-        participant2: null,
-        participant1Seed: null,
-        participant2Seed: null,
-        winner: null,
-        status: 'pending',
-        nextMatchId,
-        nextMatchSlot,
-        loserNextMatchId: null,
-        loserNextMatchSlot: null,
-      };
-
-      matches.push(match);
+      matches.push({
+        id: matchId, round, position, bracketType: 'winners',
+        participant1: null, participant2: null, participant1Seed: null, participant2Seed: null,
+        winner: null, status: 'pending', nextMatchId, nextMatchSlot,
+        loserNextMatchId: null, loserNextMatchSlot: null,
+      });
     }
   }
 
-  // Populate first round with participants based on seeding
-  const firstRoundMatches = matches.filter(m => m.round === 1);
-  const firstRoundMatchCount = firstRoundMatches.length;
-
-  for (let i = 0; i < firstRoundMatchCount; i++) {
-    const match = firstRoundMatches[i]!;
-    const seed1 = seedOrder[i * 2]!;
-    const seed2 = seedOrder[i * 2 + 1]!;
-
-    const p1 = participantBySeed.get(seed1);
-    const p2 = participantBySeed.get(seed2);
-
-    const p1Exists = p1 !== undefined;
-    const p2Exists = p2 !== undefined;
-
-    if (!p1Exists && !p2Exists) {
-      // Neither participant exists - shouldn't happen
-      match.status = 'pending';
-    } else if (p1Exists && !p2Exists) {
-      // P1 exists, P2 doesn't - P1 gets a bye
-      match.participant1 = p1.id;
-      match.participant1Seed = seed1;
-      match.participant2 = null;
-      match.participant2Seed = null;
-      match.winner = p1.id;
-      match.status = 'bye';
-
-      // Advance winner to next match
-      if (match.nextMatchId) {
-        advanceWinner(matches, match.nextMatchId, match.nextMatchSlot!, p1.id, seed1);
-      }
-    } else if (!p1Exists && p2Exists) {
-      // P2 exists, P1 doesn't - P2 gets a bye
-      match.participant1 = null;
-      match.participant1Seed = null;
-      match.participant2 = p2.id;
-      match.participant2Seed = seed2;
-      match.winner = p2.id;
-      match.status = 'bye';
-
-      // Advance winner to next match
-      if (match.nextMatchId) {
-        advanceWinner(matches, match.nextMatchId, match.nextMatchSlot!, p2.id, seed2);
-      }
-    } else if (p1Exists && p2Exists) {
-      // Normal match
-      match.participant1 = p1?.id ?? null;
-      match.participant1Seed = seed1;
-      match.participant2 = p2?.id ?? null;
-      match.participant2Seed = seed2;
+  const firstRound = matches.filter((m) => m.round === 1);
+  for (let i = 0; i < firstRound.length; i++) {
+    const match = firstRound[i]!;
+    const p1 = slots[i * 2] ?? undefined;
+    const p2 = slots[i * 2 + 1] ?? undefined;
+    if (p1 && !p2) {
+      match.participant1 = p1.id; match.participant1Seed = p1.seed;
+      match.winner = p1.id; match.status = 'bye';
+      if (match.nextMatchId) advanceWinner(matches, match.nextMatchId, match.nextMatchSlot!, p1.id, p1.seed);
+    } else if (!p1 && p2) {
+      match.participant2 = p2.id; match.participant2Seed = p2.seed;
+      match.winner = p2.id; match.status = 'bye';
+      if (match.nextMatchId) advanceWinner(matches, match.nextMatchId, match.nextMatchSlot!, p2.id, p2.seed);
+    } else if (p1 && p2) {
+      match.participant1 = p1.id; match.participant1Seed = p1.seed;
+      match.participant2 = p2.id; match.participant2Seed = p2.seed;
       match.status = 'ready';
-    }
+    } // both null: leave pending (dead slot)
   }
 
-  // Update status of matches that have both participants filled
   updateMatchStatuses(matches);
-
-  return {
-    tournamentId,
-    format: 'single_elim',
-    matches,
-    totalRounds,
-    participantCount,
-  };
+  return { tournamentId, format: 'single_elim', matches, totalRounds, participantCount: realCount };
 }
 
 /**

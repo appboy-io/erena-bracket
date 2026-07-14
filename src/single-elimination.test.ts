@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateSingleElimination, reportMatchResult } from './single-elimination.js';
+import { generateSingleElimination, reportMatchResult, buildSingleElimination } from './single-elimination.js';
+import { slotsFromSeeding } from './utils.js';
 import type { Participant } from './types.js';
 
 function createParticipants(count: number): Participant[] {
@@ -197,5 +198,38 @@ describe('reportMatchResult', () => {
     const completedFinals = bracket.matches.find(m => m.round === 2)!;
     expect(completedFinals.winner).toBe('player_1');
     expect(completedFinals.status).toBe('completed');
+  });
+});
+
+function ps(n: number) {
+  return Array.from({ length: n }, (_, i) => ({ id: `p${i + 1}`, seed: i + 1, name: `P${i + 1}` }));
+}
+
+describe('slotsFromSeeding', () => {
+  it('places seeds into standard slot order, byes as null', () => {
+    const slots = slotsFromSeeding(ps(6), 8); // 6 players, 2 byes
+    expect(slots.length).toBe(8);
+    // standard 8-seed order = [1,8,4,5,2,7,3,6]; seeds 7,8 are byes (only 6 players)
+    expect(slots.map(s => (s ? s.seed : 0))).toEqual([1, 0, 4, 5, 2, 0, 3, 6]);
+  });
+});
+
+describe('buildSingleElimination matches generateSingleElimination', () => {
+  it('produces identical output for 6 players', () => {
+    const parts = ps(6);
+    const viaSeeds = generateSingleElimination({ tournamentId: 't', participants: parts });
+    const slots = slotsFromSeeding(parts, 8);
+    const viaSlots = buildSingleElimination('t', slots);
+    expect(viaSlots.matches).toEqual(viaSeeds.matches);
+  });
+  it('supports an arbitrary bye placement seeds cannot express', () => {
+    // 3 players in a 4-slot bracket, but give the BYE to slot 0 (not the top seed)
+    const [a, b, c] = ps(3) as [Participant, Participant, Participant];
+    const bracket = buildSingleElimination('t', [null, a, b, c]);
+    const r1 = bracket.matches.filter(m => m.round === 1).sort((x, y) => x.position - y.position);
+    // match 1: (null, a) -> a byes; match 2: (b, c) -> ready
+    expect(r1[0]!.status).toBe('bye');
+    expect(r1[0]!.winner).toBe('p1');
+    expect(r1[1]!.status).toBe('ready');
   });
 });

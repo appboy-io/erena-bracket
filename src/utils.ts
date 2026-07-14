@@ -1,3 +1,5 @@
+import type { Participant } from './types.js';
+
 /**
  * Get the next power of 2 >= n
  */
@@ -76,4 +78,16 @@ export function assignByes(
     byeSeeds.add(seed);
   }
   return byeSeeds;
+}
+
+/** Map participants (by their .seed) into an explicit slot array of length
+ *  bracketSize using the standard seed order. Missing seeds become null (byes). */
+export function slotsFromSeeding(
+  participants: Participant[],
+  bracketSize: number
+): (Participant | null)[] {
+  const seedOrder = generateSeedOrder(bracketSize);
+  const bySeed = new Map<number, Participant>();
+  for (const p of participants) bySeed.set(p.seed, p);
+  return seedOrder.map((seed) => bySeed.get(seed) ?? null);
 }
