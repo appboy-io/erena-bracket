@@ -233,6 +233,35 @@ function generateGrandFinals(matches, tournamentId, winnersRounds, grandFinalRes
         losersFinals.nextMatchSlot = 2;
     }
 }
+const CROSSOVER_PERMS = {
+    // seat order unchanged
+    identity: (pos) => pos - 1,
+    // last dropper takes the first seat
+    reverse: (pos, c) => c - pos,
+    // top half and bottom half trade places
+    halfswap: (pos, c) => (pos <= c / 2 ? pos + c / 2 : pos - c / 2) - 1,
+    // half-swap, then reversed
+    revhalf: (pos, c) => {
+        const h = c / 2;
+        return c - (pos <= h ? pos + h : pos - h);
+    },
+};
+const CROSSOVER_PLAN = {
+    3: ['reverse'],
+    4: ['reverse', 'identity'],
+    5: ['reverse', 'revhalf', 'reverse'],
+    6: ['reverse', 'halfswap', 'revhalf', 'reverse'],
+    7: ['reverse', 'revhalf', 'halfswap', 'identity', 'reverse'],
+    8: ['reverse', 'halfswap', 'revhalf', 'identity', 'reverse', 'identity'],
+    9: ['reverse', 'revhalf', 'halfswap', 'identity', 'reverse', 'revhalf', 'reverse'],
+};
+/** Permutation for winners round `wRound` (>= 2) in a bracket of `bracketSize`.
+ *  Beyond 512 players there is no searched plan, so fall back to plain reversal. */
+function crossoverFor(bracketSize, wRound) {
+    const plan = CROSSOVER_PLAN[Math.log2(bracketSize)];
+    const name = plan?.[wRound - 2];
+    return (name && CROSSOVER_PERMS[name]) || CROSSOVER_PERMS['reverse'];
+}
 function linkWinnersToLosers(matches, tournamentId, winnersRounds, bracketSize) {
     // Special case: 2-player tournament (winnersRounds === 1)
     // There are no losers bracket matches - the loser goes directly to grand finals slot 2
@@ -263,27 +292,14 @@ function linkWinnersToLosers(matches, tournamentId, winnersRounds, bracketSize) 
         }
         const losersMatches = matches.filter(m => m.bracketType === 'losers' && m.round === losersRound);
         if (wRound >= 2) {
-            // Standard crossover drop: WB round-r losers (slot 2) are placed into the
-            // round's losers seats using an ALTERNATING permutation — full reversal on
-            // even winners rounds, half-swap on odd ones. This is the classic double-elim
-            // seeding: it pushes any rematch of two players who met in winners to the
-            // latest round the bracket structurally allows (earliest possible rematch =
-            // log2(bracketSize) losers round), matching start.gg. Simple reversal or a
-            // single half-swap alone is not optimal for brackets of 32+.
+            // Crossover drop: WB round-r losers (slot 2) are placed into that round's
+            // losers seats through a permutation chosen per bracket size — see
+            // CROSSOVER_PLAN and the note above it.
             const seats = [...losersMatches].sort((a, b) => a.position - b.position);
-            const c = seats.length;
             const droppers = [...winnersMatches].sort((a, b) => a.position - b.position);
+            const permute = crossoverFor(bracketSize, wRound);
             droppers.forEach((wm, i) => {
-                const pos = i + 1; // 1-based dropper position
-                let seatIndex;
-                if (wRound % 2 === 0) {
-                    seatIndex = c - pos; // full reversal (0-based)
-                }
-                else {
-                    const h = c / 2; // half-swap
-                    seatIndex = (pos <= h ? pos + h : pos - h) - 1;
-                }
-                wm.loserNextMatchId = seats[seatIndex].id;
+                wm.loserNextMatchId = seats[permute(i + 1, seats.length)].id;
                 wm.loserNextMatchSlot = 2;
             });
             continue; // whole round handled; skip the per-match loop below

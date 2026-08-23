@@ -318,6 +318,59 @@ function generateGrandFinals(
   }
 }
 
+/**
+ * Losers-bracket crossover permutations.
+ *
+ * When the losers of winners round r drop into losers round 2r-2, WHICH seat
+ * each loser takes decides how soon two players who already met in the winners
+ * bracket can be forced together again ("double jeopardy"). The four candidate
+ * permutations below are the classic ones; which combination is best depends on
+ * the bracket size and is not expressible as a simple alternating rule.
+ *
+ * CROSSOVER_PLAN[log2(bracketSize)][r - 2] was derived by exhaustive search over
+ * all four permutations at every drop round, ranked lexicographically so that
+ * rematches between players who met EARLY in winners (the ones players actually
+ * notice) are pushed back first. `losers crossover is optimal` in the test suite
+ * re-checks the resulting separation, so this table cannot silently rot.
+ *
+ * Regression: tsl-1-marvel-tokon (2026-08-22) — the previous alternating rule
+ * re-paired a winners round-3 pair at LR6, the earliest round the structure
+ * allows. The plan below pushes that to LR7.
+ */
+type CrossoverPerm = (pos: number, seatCount: number) => number;
+
+const CROSSOVER_PERMS: Record<string, CrossoverPerm> = {
+  // seat order unchanged
+  identity: (pos) => pos - 1,
+  // last dropper takes the first seat
+  reverse: (pos, c) => c - pos,
+  // top half and bottom half trade places
+  halfswap: (pos, c) => (pos <= c / 2 ? pos + c / 2 : pos - c / 2) - 1,
+  // half-swap, then reversed
+  revhalf: (pos, c) => {
+    const h = c / 2;
+    return c - (pos <= h ? pos + h : pos - h);
+  },
+};
+
+const CROSSOVER_PLAN: Record<number, string[]> = {
+  3: ['reverse'],
+  4: ['reverse', 'identity'],
+  5: ['reverse', 'revhalf', 'reverse'],
+  6: ['reverse', 'halfswap', 'revhalf', 'reverse'],
+  7: ['reverse', 'revhalf', 'halfswap', 'identity', 'reverse'],
+  8: ['reverse', 'halfswap', 'revhalf', 'identity', 'reverse', 'identity'],
+  9: ['reverse', 'revhalf', 'halfswap', 'identity', 'reverse', 'revhalf', 'reverse'],
+};
+
+/** Permutation for winners round `wRound` (>= 2) in a bracket of `bracketSize`.
+ *  Beyond 512 players there is no searched plan, so fall back to plain reversal. */
+function crossoverFor(bracketSize: number, wRound: number): CrossoverPerm {
+  const plan = CROSSOVER_PLAN[Math.log2(bracketSize)];
+  const name = plan?.[wRound - 2];
+  return (name && CROSSOVER_PERMS[name]) || CROSSOVER_PERMS['reverse']!;
+}
+
 function linkWinnersToLosers(
   matches: Match[],
   tournamentId: string,
@@ -365,26 +418,14 @@ function linkWinnersToLosers(
     );
 
 		if (wRound >= 2) {
-			// Standard crossover drop: WB round-r losers (slot 2) are placed into the
-			// round's losers seats using an ALTERNATING permutation — full reversal on
-			// even winners rounds, half-swap on odd ones. This is the classic double-elim
-			// seeding: it pushes any rematch of two players who met in winners to the
-			// latest round the bracket structurally allows (earliest possible rematch =
-			// log2(bracketSize) losers round), matching start.gg. Simple reversal or a
-			// single half-swap alone is not optimal for brackets of 32+.
+			// Crossover drop: WB round-r losers (slot 2) are placed into that round's
+			// losers seats through a permutation chosen per bracket size — see
+			// CROSSOVER_PLAN and the note above it.
 			const seats = [...losersMatches].sort((a, b) => a.position - b.position);
-			const c = seats.length;
 			const droppers = [...winnersMatches].sort((a, b) => a.position - b.position);
+			const permute = crossoverFor(bracketSize, wRound);
 			droppers.forEach((wm, i) => {
-				const pos = i + 1; // 1-based dropper position
-				let seatIndex: number;
-				if (wRound % 2 === 0) {
-					seatIndex = c - pos; // full reversal (0-based)
-				} else {
-					const h = c / 2; // half-swap
-					seatIndex = (pos <= h ? pos + h : pos - h) - 1;
-				}
-				wm.loserNextMatchId = seats[seatIndex]!.id;
+				wm.loserNextMatchId = seats[permute(i + 1, seats.length)]!.id;
 				wm.loserNextMatchSlot = 2;
 			});
 			continue; // whole round handled; skip the per-match loop below

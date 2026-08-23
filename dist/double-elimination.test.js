@@ -328,4 +328,115 @@ describe('buildDoubleElimination matches generateDoubleElimination', () => {
         expect(wr1[1].winner).toBe('p3');
     });
 });
+// ---------------------------------------------------------------------------
+// Crossover optimality (tsl-1-marvel-tokon regression, 2026-08-23)
+// ---------------------------------------------------------------------------
+// Reported: Lowry (WR3M4 loser) was knocked out by BlackVegeta (WR3M4 winner)
+// again in LR6M1 of a 32-slot bracket. The old alternating crossover routed a
+// winners round-r pair back together at LR(2r) — the earliest round the
+// structure permits — instead of pushing them past it.
+//
+// `losersRematchSlack` measures, for each winners round r, how many rounds
+// LATER than the structural minimum LR(2r) two players who met in WR r can
+// first be re-paired. Bigger is better; the last entry is always 0 because the
+// losers final is genuinely unavoidable.
+/** Every winners match a player who reached `wbId` must already have played. */
+function winnersUpstream(matches, wbId, acc = new Set()) {
+    if (acc.has(wbId))
+        return acc;
+    acc.add(wbId);
+    for (const f of matches.filter((m) => m.bracketType === 'winners' && m.nextMatchId === wbId)) {
+        winnersUpstream(matches, f.id, acc);
+    }
+    return acc;
+}
+/** Every winners match a player arriving at (matchId, slot) could have played in.
+ *  Unlike `winnersAncestry` this recurses through the WINNERS bracket as well —
+ *  a player dropping out of WR4M2 also played WR3M3-or-WR3M4 to get there, and
+ *  that is precisely the rematch the Tokon bug missed. */
+function winnersPlayedIn(matches, matchId, slot, memo = new Map()) {
+    const key = `${matchId}#${slot}`;
+    const hit = memo.get(key);
+    if (hit)
+        return hit;
+    const acc = new Set();
+    memo.set(key, acc); // cycle guard
+    const feeders = matches.filter((m) => (m.nextMatchId === matchId && m.nextMatchSlot === slot) ||
+        (m.loserNextMatchId === matchId && m.loserNextMatchSlot === slot));
+    for (const f of feeders) {
+        if (f.bracketType === 'winners') {
+            for (const id of winnersUpstream(matches, f.id))
+                acc.add(id);
+        }
+        else {
+            for (const s of [1, 2]) {
+                for (const id of winnersPlayedIn(matches, f.id, s, memo))
+                    acc.add(id);
+            }
+        }
+    }
+    return acc;
+}
+/** slack[r-1] = (earliest losers round a WR-r pair can be re-paired) - LR(2r). */
+function losersRematchSlack(bracket, bracketSize) {
+    const ms = bracket.matches;
+    const winnersRounds = Math.log2(bracketSize);
+    const roundOf = new Map(ms.filter((m) => m.bracketType === 'winners').map((m) => [m.id, m.round]));
+    const earliest = new Map();
+    const memo = new Map();
+    for (const m of ms.filter((x) => x.bracketType === 'losers').sort((a, b) => a.round - b.round)) {
+        const a1 = winnersPlayedIn(ms, m.id, 1, memo);
+        const a2 = winnersPlayedIn(ms, m.id, 2, memo);
+        for (const id of a1) {
+            if (!a2.has(id))
+                continue;
+            const r = roundOf.get(id);
+            if (!earliest.has(r) || m.round < earliest.get(r))
+                earliest.set(r, m.round);
+        }
+    }
+    return Array.from({ length: winnersRounds - 1 }, (_, i) => {
+        const r = i + 1;
+        const e = earliest.get(r);
+        const structuralMin = r === 1 ? 2 : 2 * r;
+        return e === undefined ? Infinity : e - structuralMin;
+    });
+}
+describe('losers crossover is optimal', () => {
+    // Derived by exhaustive search over {identity, reverse, half-swap,
+    // reverse-half-swap} at every drop round, ranked lexicographically so that
+    // EARLY-round rematches (the ones players actually complain about) are
+    // pushed back first. See docs/losers-crossover.md.
+    it.each([
+        [8, [1, 0]],
+        [16, [2, 1, 0]],
+        [32, [3, 2, 1, 0]],
+        [64, [5, 3, 2, 1, 0]],
+        [128, [6, 5, 3, 2, 1, 0]],
+        [256, [6, 6, 5, 3, 2, 1, 0]],
+    ])('players=%i: rematch slack per winners round is %j', (n, expected) => {
+        const bracket = generateDoubleElimination({
+            tournamentId: 'test',
+            participants: createParticipants(n),
+        });
+        expect(losersRematchSlack(bracket, n)).toEqual(expected);
+    });
+    it('tsl-1-marvel-tokon: a WR3 pair cannot be re-paired at LR6 in a 32 bracket', () => {
+        const bracket = generateDoubleElimination({
+            tournamentId: 'test',
+            participants: createParticipants(32),
+        });
+        const wr3 = new Set(bracket.matches.filter((m) => m.bracketType === 'winners' && m.round === 3).map((m) => m.id));
+        const memo = new Map();
+        const offenders = [];
+        for (const m of bracket.matches.filter((x) => x.bracketType === 'losers' && x.round <= 6)) {
+            const a1 = winnersPlayedIn(bracket.matches, m.id, 1, memo);
+            const a2 = winnersPlayedIn(bracket.matches, m.id, 2, memo);
+            const clash = [...a1].filter((id) => a2.has(id) && wr3.has(id));
+            if (clash.length)
+                offenders.push(`${m.id} <- ${clash.join(',')}`);
+        }
+        expect(offenders, `WR3 rematch possible at or before LR6: ${offenders.join(' | ')}`).toEqual([]);
+    });
+});
 //# sourceMappingURL=double-elimination.test.js.map
