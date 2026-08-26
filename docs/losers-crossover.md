@@ -66,6 +66,53 @@ cannot be made rematch-proof.
 For the Tokon bracket specifically, the earliest possible Lowry/BlackVegeta
 rematch moves from LR6 to LR7.
 
+## How good is this, exactly
+
+Good enough to stop looking, at the sizes that matter.
+
+`scripts/crossover-search.mjs` scores an arrangement with a bitmask model: "which
+winners matches could the player arriving at this slot already have played" is a set
+over winners matches, so it is a bitmask; a rematch is possible in a losers match iff
+its two slot masks intersect; the winner of a losers match carries the union of its
+two slots, since the winner is one of the two and either is reachable in some
+play-out. That makes a full evaluation a few dozen bit operations.
+
+Read the numbers as slack per winners round `r`: how many rounds LATER than the
+structural minimum LR(2r) two players who met in WR `r` can first be re-paired.
+Bigger is better.
+
+| bracket | searched | best possible | `CROSSOVER_PLAN` |
+|---------|----------|---------------|------------------|
+| 16      | all 48 arrangements | `[2,1,0]` | `[2,1,0]` — optimal |
+| 32      | all 1,935,360 (8!x4!x2!) | `[3,2,1,0]` | `[3,2,1,0]` — optimal, 640 ways tie |
+| 64      | every 1- and 2-swap (15,376) | unknown | `[5,3,2,1,0]` — local optimum |
+| 128     | every 1- and 2-swap (261,888) | unknown | `[6,5,3,2,1,0]` — local optimum |
+| 256     | every 1- and 2-swap (4,328,160) | unknown | `[6,6,5,3,2,1,0]` — local optimum |
+
+16 and 32 are settled outright: the whole permutation space was enumerated and the
+shipped plan sits at the optimum. Above that, `16!` alone is about 2x10^13, so
+exhaustive search is out; all that is proven there is that nothing within two swaps
+improves on it.
+
+**The last entry is always 0, and always will be.** Two players who met in the
+winners bracket can always be forced together in the losers final. No static routing
+escapes that — start.gg has the identical floor. The correct claim for this fix is
+"rematches are pushed to the latest round the structure allows", never "rematches
+cannot happen".
+
+### A warning about the search itself
+
+Random-restart hill climbing does not work here. At 64 it returns `[4,3,2,1,0]` —
+worse than the plan already shipped — because a 16!-sized space traps steepest-ascent
+in local optima. The `climb` mode is kept only so nobody rediscovers this the hard
+way.
+
+Two habits caught that. The model was made to reproduce all six previously-known
+slack vectors before any new number from it was believed (`validate` mode, run it
+first). And the climber was pointed at 32, where the answer was already proven, which
+is what exposed it. Above k=5, seed the search FROM the shipped plan (`refine`) rather
+than from random arrangements.
+
 ## Keeping it honest
 
 Two tests hold the line, both in `src/double-elimination.test.ts` and
@@ -80,8 +127,7 @@ Two tests hold the line, both in `src/double-elimination.test.ts` and
   the match that actually happened.
 
 Above 512 players there is no searched plan and the code falls back to plain
-reversal. Re-run the search (see the git history of this fix) if that ever
-matters.
+reversal. Run `scripts/crossover-search.mjs` if that ever matters.
 
 ## Caveat
 
