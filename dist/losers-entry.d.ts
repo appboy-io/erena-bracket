@@ -1,0 +1,36 @@
+/**
+ * Entry-round arithmetic for a losers bracket seeded with direct entrants.
+ *
+ * A pools phase can send its runners-up straight into losers. Those entrants
+ * cannot simply be dropped anywhere: the losers bracket has an invariant that
+ * entering each drop round, the survivor count equals the incoming drop count.
+ * Winners round 1 produces bracketSize/2 losers, so the direct entrants must be
+ * halved until they reach that number. Each halving is one entry round.
+ *
+ *   Top 24 — winners bracket of 8, 16 direct into losers
+ *     LE1   8 matches   16 -> 8
+ *     LE2   4 matches    8 -> 4
+ *     then 4 survivors meet the 4 winners-round-1 losers, and the ordinary
+ *     alternating merge/reduce pattern takes over unchanged.
+ *
+ * Sanity check for any shape: a double elim of N players needs N-1
+ * eliminations; only losers matches and the grand final eliminate.
+ */
+export declare class EntryShapeError extends Error {
+}
+export interface EntryShape {
+    /** rounds in the winners bracket */
+    winnersRounds: number;
+    /** how many rounds are prepended to thin the direct entrants */
+    entryRounds: number;
+    /** match count in each entry round, first round first */
+    entryMatchesPerRound: number[];
+    /** total losers rounds: entry rounds plus the standard ones */
+    losersRounds: number;
+}
+/**
+ * @param bracketSize    size of the WINNERS bracket, a power of two
+ * @param directEntrants how many entrants start in the losers bracket
+ */
+export declare function planEntryShape(bracketSize: number, directEntrants: number): EntryShape;
+//# sourceMappingURL=losers-entry.d.ts.map
