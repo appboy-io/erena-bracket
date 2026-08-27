@@ -19,10 +19,13 @@ describe('planEntryShape', () => {
         expect(planEntryShape(8, 32).entryRounds).toBe(3);
     });
     it('counts total losers rounds as entry rounds plus the standard ones', () => {
-        // standard losers rounds for a bracket of 8 is 2*(3-1) = 4
-        expect(planEntryShape(8, 16).losersRounds).toBe(6);
-        expect(planEntryShape(8, 4).losersRounds).toBe(4);
-        expect(planEntryShape(16, 32).losersRounds).toBe(8);
+        // The standard portion is 2W-1 rounds, not 2(W-1): a normal LR1 merges AND
+        // halves (winners round 1's losers pair each other), whereas an entry merge
+        // round only merges, so it needs a reduce round of its own.
+        //   8x16: LR1 8  LR2 4 | LR3 4  LR4 2 | LR5 2  LR6 1 | LR7 1
+        expect(planEntryShape(8, 16).losersRounds).toBe(7);
+        expect(planEntryShape(8, 4).losersRounds).toBe(5);
+        expect(planEntryShape(16, 32).losersRounds).toBe(9);
     });
     it('rejects a direct-entrant count that cannot reduce cleanly', () => {
         // 6 does not halve down to 4

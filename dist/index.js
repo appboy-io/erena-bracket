@@ -1,7 +1,8 @@
 export * from './types.js';
 export * from './utils.js';
 export { generateSingleElimination, reportMatchResult, buildSingleElimination } from './single-elimination.js';
-export { generateDoubleElimination, reportDoubleElimMatchResult, propagateByes, buildDoubleElimination, } from './double-elimination.js';
+export { generateDoubleElimination, reportDoubleElimMatchResult, propagateByes, buildDoubleElimination, buildDoubleEliminationWithEntry, } from './double-elimination.js';
+export { planEntryShape, EntryShapeError } from './losers-entry.js';
 import { generateSingleElimination, buildSingleElimination } from './single-elimination.js';
 import { generateDoubleElimination, buildDoubleElimination } from './double-elimination.js';
 /**

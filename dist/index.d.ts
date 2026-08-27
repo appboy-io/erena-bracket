@@ -1,7 +1,8 @@
 export * from './types.js';
 export * from './utils.js';
 export { generateSingleElimination, reportMatchResult, buildSingleElimination } from './single-elimination.js';
-export { generateDoubleElimination, reportDoubleElimMatchResult, propagateByes, buildDoubleElimination, } from './double-elimination.js';
+export { generateDoubleElimination, reportDoubleElimMatchResult, propagateByes, buildDoubleElimination, buildDoubleEliminationWithEntry, } from './double-elimination.js';
+export { planEntryShape, EntryShapeError, type EntryShape } from './losers-entry.js';
 import type { Bracket, BracketGeneratorOptions, Participant } from './types.js';
 /**
  * Generate a tournament bracket

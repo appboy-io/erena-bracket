@@ -59,4 +59,9 @@ export declare function propagateByes(matches: Match[]): void;
  * Report a match result in double elimination
  */
 export declare function reportDoubleElimMatchResult(bracket: Bracket, matchId: string, winnerId: string): Bracket;
+/** Build a double-elim bracket in which `losersEntrants` start in the losers
+ *  bracket. `winnersSlots` is the winners round-1 slot array (length a power of
+ *  two, null for a bye); `losersEntrants` must be the winners round-1 loser
+ *  count times a power of two, or the shape cannot reduce cleanly. */
+export declare function buildDoubleEliminationWithEntry(tournamentId: string, winnersSlots: (Participant | null)[], losersEntrants: (Participant | null)[], grandFinalReset?: boolean): Bracket;
 //# sourceMappingURL=double-elimination.d.ts.map

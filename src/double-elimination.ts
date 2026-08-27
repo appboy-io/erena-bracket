@@ -5,6 +5,7 @@ import {
   generateMatchId,
   slotsFromSeeding,
 } from './utils.js';
+import { planEntryShape, type EntryShape } from './losers-entry.js';
 
 export interface DoubleEliminationOptions {
   tournamentId: string;
@@ -658,4 +659,239 @@ export function reportDoubleElimMatchResult(
     ...bracket,
     matches,
   };
+}
+
+/* ---------------------------------------------------------------------------
+ * Double elimination with entrants seeded straight into the losers bracket.
+ *
+ * A pools phase sends its pool winners into the winners bracket and its
+ * runners-up into losers, already carrying a loss. The losers bracket therefore
+ * starts populated, which changes its shape at the front: entry rounds halve
+ * the direct entrants until they equal the winners round-1 loser count, and
+ * only then does the ordinary alternating merge/reduce pattern resume.
+ *
+ *   Top 24 -- winners bracket of 8, 16 direct into losers
+ *     LR1  8   entry, 16 -> 8         LR2  4   entry, 8 -> 4
+ *     LR3  4   merge, WR1's 4 losers  LR4  2   reduce
+ *     LR5  2   merge, WR2's 2 losers  LR6  1   reduce
+ *     LR7  1   merge, WR3's loser (the losers final)
+ *   22 matches + the grand final = 23 = 24 - 1 eliminations.
+ *
+ * Entry rounds are ordinary losers rounds, so no new bracket type is introduced
+ * and everything downstream shifts by the entry-round count. Connector geometry
+ * downstream is derived from nextMatchId, so these brackets render with no
+ * display-side work.
+ *
+ * buildDoubleElimination and CROSSOVER_PLAN above are deliberately untouched:
+ * empty-losers brackets are proven optimal at 16 and 32 and must stay
+ * bit-identical.
+ * ------------------------------------------------------------------------- */
+
+/** Build a double-elim bracket in which `losersEntrants` start in the losers
+ *  bracket. `winnersSlots` is the winners round-1 slot array (length a power of
+ *  two, null for a bye); `losersEntrants` must be the winners round-1 loser
+ *  count times a power of two, or the shape cannot reduce cleanly. */
+export function buildDoubleEliminationWithEntry(
+  tournamentId: string,
+  winnersSlots: (Participant | null)[],
+  losersEntrants: (Participant | null)[],
+  grandFinalReset: boolean = true
+): Bracket {
+  const bracketSize = winnersSlots.length;
+  const directEntrants = losersEntrants.length;
+  // Throws for a winners bracket that is not a power of two, or an entrant
+  // count that cannot halve down to the winners round-1 loser count.
+  const shape = planEntryShape(bracketSize, directEntrants);
+  const { winnersRounds, losersRounds } = shape;
+
+  const matches: Match[] = [];
+
+  generateWinnersBracket(
+    matches,
+    tournamentId,
+    bracketSize,
+    winnersRounds,
+    winnersSlots
+  );
+
+  // Grand finals BEFORE the losers bracket, on purpose. generateGrandFinals
+  // links the losers final by the standard round number, (winnersRounds-1)*2,
+  // which here is an ordinary mid-bracket round -- letting it run last would
+  // point that round's first match at the grand final. Running it while the
+  // losers bracket does not exist leaves the lookup empty, and the losers
+  // generator below points the real losers final at the grand final itself.
+  generateGrandFinals(matches, tournamentId, winnersRounds, grandFinalReset);
+
+  generateEntryLosersBracket(matches, tournamentId, bracketSize, shape);
+  seatDirectEntrants(matches, shape, losersEntrants);
+  linkWinnersToEntryLosers(matches, bracketSize, directEntrants, shape);
+
+  propagateByes(matches);
+  updateMatchStatuses(matches);
+
+  const realCount =
+    winnersSlots.filter((s): s is Participant => s !== null).length +
+    losersEntrants.filter((s): s is Participant => s !== null).length;
+
+  return {
+    tournamentId,
+    format: 'double_elim',
+    // winners, losers, grand final -- the order buildDoubleElimination emits.
+    matches: [
+      ...matches.filter(m => m.bracketType === 'winners'),
+      ...matches.filter(m => m.bracketType === 'losers'),
+      ...matches.filter(m => m.bracketType === 'grand_final'),
+    ],
+    totalRounds: winnersRounds + losersRounds + (grandFinalReset ? 2 : 1),
+    participantCount: realCount,
+  };
+}
+
+/** Matches in each losers round, LR1 first: the entry rounds, then the standard
+ *  alternating merge/reduce pattern starting from bracketSize / 2. */
+function entryLosersRoundSizes(bracketSize: number, shape: EntryShape): number[] {
+  const counts = [...shape.entryMatchesPerRound];
+  for (let s = 1; s <= shape.losersRounds - shape.entryRounds; s++) {
+    counts.push(
+      s % 2 === 1
+        // merge round: takes the losers of winners round (s+1)/2
+        ? bracketSize / Math.pow(2, (s + 1) / 2)
+        // reduce round: halves the merge round before it
+        : bracketSize / Math.pow(2, s / 2 + 1)
+    );
+  }
+  return counts;
+}
+
+function generateEntryLosersBracket(
+  matches: Match[],
+  tournamentId: string,
+  bracketSize: number,
+  shape: EntryShape
+): void {
+  const counts = entryLosersRoundSizes(bracketSize, shape);
+  const grandFinalId = generateMatchId(tournamentId, 'grand_final', 1, 1);
+
+  for (let lRound = 1; lRound <= shape.losersRounds; lRound++) {
+    const matchesInRound = counts[lRound - 1]!;
+    const nextCount = counts[lRound] ?? 0;
+    // A round that keeps its match count feeds the next one 1:1 (its winner
+    // takes slot 1 and meets a dropper); a round that halves pairs up.
+    const feedsOneToOne = nextCount === matchesInRound;
+
+    for (let position = 1; position <= matchesInRound; position++) {
+      let nextMatchId: string;
+      let nextMatchSlot: 1 | 2;
+
+      if (lRound === shape.losersRounds) {
+        nextMatchId = grandFinalId;
+        nextMatchSlot = 2;
+      } else if (feedsOneToOne) {
+        nextMatchId = generateMatchId(tournamentId, 'losers', lRound + 1, position);
+        nextMatchSlot = 1;
+      } else {
+        nextMatchId = generateMatchId(tournamentId, 'losers', lRound + 1, Math.ceil(position / 2));
+        nextMatchSlot = position % 2 === 1 ? 1 : 2;
+      }
+
+      matches.push({
+        id: generateMatchId(tournamentId, 'losers', lRound, position),
+        round: lRound,
+        position,
+        bracketType: 'losers',
+        participant1: null,
+        participant2: null,
+        participant1Seed: null,
+        participant2Seed: null,
+        winner: null,
+        status: 'pending',
+        nextMatchId,
+        nextMatchSlot,
+        loserNextMatchId: null, // losers bracket losers are eliminated
+        loserNextMatchSlot: null,
+      });
+    }
+  }
+}
+
+/** Seat the direct entrants into losers round 1. With entry rounds that round is
+ *  entrants only, so they pair off; with none it is already the first merge
+ *  round, so each entrant takes slot 1 and waits for a dropper. */
+function seatDirectEntrants(
+  matches: Match[],
+  shape: EntryShape,
+  losersEntrants: (Participant | null)[]
+): void {
+  const round1 = matches
+    .filter(m => m.bracketType === 'losers' && m.round === 1)
+    .sort((a, b) => a.position - b.position);
+
+  if (shape.entryRounds === 0) {
+    round1.forEach((match, i) => {
+      const entrant = losersEntrants[i];
+      if (entrant) {
+        match.participant1 = entrant.id;
+        match.participant1Seed = entrant.seed;
+      }
+    });
+    return;
+  }
+
+  round1.forEach((match, i) => {
+    const p1 = losersEntrants[i * 2] ?? undefined;
+    const p2 = losersEntrants[i * 2 + 1] ?? undefined;
+
+    if (p1 && !p2) {
+      match.participant1 = p1.id;
+      match.participant1Seed = p1.seed;
+      match.winner = p1.id;
+      match.status = 'bye';
+      advanceToMatch(matches, match.nextMatchId!, match.nextMatchSlot!, p1.id, p1.seed);
+    } else if (p2 && !p1) {
+      match.participant2 = p2.id;
+      match.participant2Seed = p2.seed;
+      match.winner = p2.id;
+      match.status = 'bye';
+      advanceToMatch(matches, match.nextMatchId!, match.nextMatchSlot!, p2.id, p2.seed);
+    } else if (p1 && p2) {
+      match.participant1 = p1.id;
+      match.participant1Seed = p1.seed;
+      match.participant2 = p2.id;
+      match.participant2Seed = p2.seed;
+      match.status = 'ready';
+    }
+    // both null: leave pending (dead slot)
+  });
+}
+
+/** Winners round r drops into losers round entryRounds + 2r - 1 -- every merge
+ *  round, including the winners final into the losers final. The dropper and
+ *  seat counts are equal by construction, and which seat each dropper takes is
+ *  ENTRY_CROSSOVER_PLAN's business (see the note above it). */
+function linkWinnersToEntryLosers(
+  matches: Match[],
+  bracketSize: number,
+  directEntrants: number,
+  shape: EntryShape
+): void {
+  for (let wRound = 1; wRound <= shape.winnersRounds; wRound++) {
+    const lRound = shape.entryRounds + 2 * wRound - 1;
+
+    const droppers = matches
+      .filter(m => m.bracketType === 'winners' && m.round === wRound)
+      .sort((a, b) => a.position - b.position);
+    const seats = matches
+      .filter(m => m.bracketType === 'losers' && m.round === lRound)
+      .sort((a, b) => a.position - b.position);
+
+    const name = entryCrossoverNameFor(bracketSize, directEntrants, wRound);
+    const permute = CROSSOVER_PERMS[name] ?? CROSSOVER_PERMS['identity']!;
+
+    droppers.forEach((wm, i) => {
+      const seat = seats[permute(i + 1, seats.length)];
+      if (!seat) return;
+      wm.loserNextMatchId = seat.id;
+      wm.loserNextMatchSlot = 2;
+    });
+  }
 }

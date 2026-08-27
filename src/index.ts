@@ -6,7 +6,9 @@ export {
   reportDoubleElimMatchResult,
   propagateByes,
   buildDoubleElimination,
+  buildDoubleEliminationWithEntry,
 } from './double-elimination.js';
+export { planEntryShape, EntryShapeError, type EntryShape } from './losers-entry.js';
 
 import type { Bracket, BracketGeneratorOptions, Participant } from './types.js';
 import { generateSingleElimination, buildSingleElimination } from './single-elimination.js';

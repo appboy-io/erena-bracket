@@ -50,7 +50,7 @@ export function planEntryShape(bracketSize, directEntrants) {
         winnersRounds,
         entryRounds,
         entryMatchesPerRound,
-        losersRounds: entryRounds + 2 * (winnersRounds - 1),
+        losersRounds: entryRounds + 2 * winnersRounds - 1,
     };
 }
 //# sourceMappingURL=losers-entry.js.map

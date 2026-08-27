@@ -25,7 +25,16 @@ export interface EntryShape {
     entryRounds: number;
     /** match count in each entry round, first round first */
     entryMatchesPerRound: number[];
-    /** total losers rounds: entry rounds plus the standard ones */
+    /**
+     * total losers rounds: the entry rounds plus `2 * winnersRounds - 1`.
+     *
+     * Note the standard portion is 2W-1 rounds, NOT the 2(W-1) an empty losers
+     * bracket has. A normal LR1 merges AND halves in one round, because winners
+     * round 1's losers pair against each other. An entry bracket's first merge
+     * round only merges — each of the bracketSize/2 survivors meets one of the
+     * bracketSize/2 droppers — so it needs a reduce round of its own before
+     * winners round 2's losers can drop in against an equal survivor count.
+     */
     losersRounds: number;
 }
 /**
