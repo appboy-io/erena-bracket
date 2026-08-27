@@ -78,6 +78,35 @@ describe('buildDoubleEliminationWithEntry', () => {
 		expect(new Set(seated).size).toBe(seated.length);
 	});
 
+	it('refuses a null entrant when there is no entry round to give it a bye', () => {
+		// e === 0 (D === B/2) is the Top-12 / 16-with-8-runners-up shape. There, LR1
+		// is already the first merge round: the entrant holds slot 1 and the winners
+		// round-1 dropper arrives in slot 2, so a null entrant leaves a match that
+		// can never be resolved -- it is not a bye anyone can walk. Fail at build
+		// time rather than hand a tournament organiser a bracket that bricks once
+		// players are waiting.
+		const winners = Array.from({ length: 8 }, (_, i) => p(i + 1));
+		const losers = [p(20), p(21), p(22), null];
+		expect(() => buildDoubleEliminationWithEntry('c', winners, losers)).toThrow(
+			/cannot give a direct entrant a bye/i
+		);
+	});
+
+	it('still gives a lone entrant a bye when there is an entry round', () => {
+		// With entry rounds the pairing round absorbs the gap: p22 walks over.
+		const winners = Array.from({ length: 8 }, (_, i) => p(i + 1));
+		const losers = [p(20), p(21), p(22), null, p(24), p(25), p(26), p(27)];
+		const b = buildDoubleEliminationWithEntry('c', winners, losers);
+		const le1 = losersRound(b, 1);
+		expect(le1).toHaveLength(4);
+		const walkover = le1[1]!;
+		expect(walkover.status).toBe('bye');
+		expect(walkover.winner).toBe('p22');
+		// and the walkover is already seated in the next round
+		const le2 = losersRound(b, 2);
+		expect(le2.flatMap((m) => [m.participant1, m.participant2])).toContain('p22');
+	});
+
 	it('refuses a shape that cannot reduce cleanly', () => {
 		const winners = Array.from({ length: 8 }, (_, i) => p(i + 1));
 		const losers = Array.from({ length: 6 }, (_, i) => p(i + 9));

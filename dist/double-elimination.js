@@ -1,5 +1,5 @@
 import { nextPowerOf2, calculateRounds, generateMatchId, slotsFromSeeding, } from './utils.js';
-import { planEntryShape } from './losers-entry.js';
+import { planEntryShape, EntryShapeError } from './losers-entry.js';
 /**
  * Generate a double elimination bracket
  *
@@ -545,6 +545,17 @@ export function buildDoubleEliminationWithEntry(tournamentId, winnersSlots, lose
     // count that cannot halve down to the winners round-1 loser count.
     const shape = planEntryShape(bracketSize, directEntrants);
     const { winnersRounds, losersRounds } = shape;
+    // With no entry rounds, losers round 1 IS the first merge round: the entrant
+    // holds slot 1 and the winners round-1 dropper arrives in slot 2. A missing
+    // entrant is therefore not a bye anyone can walk -- the dropper would sit in a
+    // match that can never be resolved, and the whole losers bracket behind it
+    // stalls. Entry rounds absorb the gap fine (seatDirectEntrants walks the lone
+    // entrant over), so this only bites when directEntrants === bracketSize / 2.
+    // Compacting the list instead would silently shift every crossover seat.
+    if (shape.entryRounds === 0 && losersEntrants.some(entrant => !entrant)) {
+        throw new EntryShapeError('a bracket with no entry rounds cannot give a direct entrant a bye; ' +
+            'supply a full entrant list');
+    }
     const matches = [];
     generateWinnersBracket(matches, tournamentId, bracketSize, winnersRounds, winnersSlots);
     // Grand finals BEFORE the losers bracket, on purpose. generateGrandFinals
