@@ -261,3 +261,121 @@ if (mode === 'refine') {
   if (improvements === 0) console.log(`  NO neighbour beats it -> shipped plan is a local optimum`);
   else { console.log(`  IMPROVED to ${JSON.stringify(bestS)}`); dropRounds.forEach((w, i) => console.log(`     WR${w} <- [${bestCfg[i].join(',')}]`)); }
 }
+
+/* ---------------------------------------------------------------------------
+ * mode: entry — losers bracket seeded with direct entrants (pools 2nd/3rd).
+ *
+ *   node scripts/crossover-search.mjs entry <k> <L>
+ *
+ * A winners bracket of 2^k, plus L entrants placed straight into losers. The
+ * direct entrants must reduce to the winners round-1 loser count (2^k / 2)
+ * before they can merge with the drops, so the losers bracket gains entry
+ * rounds at the front. After that the usual alternating merge/reduce resumes:
+ *
+ *   LE rounds   halve L until it equals the WR1 loser count
+ *   LR1         each survivor meets a WR1 loser        (merge, permuted)
+ *   LR2         reduce
+ *   LR3         survivors meet WR2 losers              (merge, permuted)
+ *   ...
+ *
+ * Direct entrants carry an EMPTY history mask: they never played in this
+ * phase's winners bracket. They still shift the geometry, which is why the
+ * plan has to be re-derived rather than assumed to carry over.
+ * (Pool rematches are a separate class and are not modelled here.)
+ * ------------------------------------------------------------------------- */
+function buildEntry(k, L) {
+  const bw = 1 << k;
+  const wr1Losers = bw / 2;
+  if (L < wr1Losers || (L / wr1Losers) & ((L / wr1Losers) - 1))
+    throw new Error(`L must be wr1Losers(${wr1Losers}) x a power of two`);
+  const B = build(k);
+  const entryRounds = Math.log2(L / wr1Losers);
+  return { ...B, L, wr1Losers, entryRounds };
+}
+
+function evaluateEntry(B, perms) {
+  const { k, wbRound, played, wr1Losers, entryRounds } = B;
+  const earliest = new Array(k + 1).fill(Infinity);
+  let lr = 0;
+
+  // entry rounds: direct entrants only, empty masks, nothing can clash
+  let survivors = new Array(B.L + 1).fill(0n);
+  let count = B.L;
+  for (let e = 0; e < entryRounds; e++) {
+    lr++;
+    const next = new Array(count / 2 + 1).fill(0n);
+    count = count / 2;
+    survivors = next;
+  }
+
+  // alternating merge / reduce, exactly as the standard bracket does
+  let dropRound = 1;
+  while (true) {
+    // merge round: survivor p meets the loser of WR[dropRound][perm(p)]
+    lr++;
+    const seats = count;
+    const merged = new Array(seats + 1).fill(0n);
+    for (let p = 1; p <= seats; p++) {
+      const s1 = survivors[p] ?? 0n;
+      const s2 = played[dropRound][perms[dropRound][p - 1]];
+      const clash = s1 & s2;
+      if (clash) {
+        let bits = clash, i = 0;
+        while (bits) { if (bits & 1n) { const r = wbRound[i]; if (lr < earliest[r]) earliest[r] = lr; } bits >>= 1n; i++; }
+      }
+      merged[p] = s1 | s2;
+    }
+    survivors = merged;
+    dropRound++;
+    if (dropRound > k) break;          // winners final loser has just dropped
+    // reduce round
+    lr++;
+    const half = seats / 2;
+    const red = new Array(half + 1).fill(0n);
+    for (let p = 1; p <= half; p++) {
+      const a = survivors[2 * p - 1], b = survivors[2 * p];
+      const clash = a & b;
+      if (clash) {
+        let bits = clash, i = 0;
+        while (bits) { if (bits & 1n) { const r = wbRound[i]; if (lr < earliest[r]) earliest[r] = lr; } bits >>= 1n; i++; }
+      }
+      red[p] = a | b;
+    }
+    survivors = red;
+    count = half;
+  }
+  return Array.from({ length: k }, (_, i) => {
+    const e = earliest[i + 1];
+    return e === Infinity ? 99 : e;
+  });
+}
+
+if (mode === 'entry') {
+  const k = Number(process.argv[3]), L = Number(process.argv[4]);
+  const B = buildEntry(k, L);
+  const dropRounds = []; for (let w = 1; w <= k; w++) dropRounds.push(w);
+  const seatCount = (w) => (w === 1 ? B.wr1Losers : B.wr1Losers / (1 << (w - 1)));
+  const lists = dropRounds.map((w) => [...permutations(Array.from({ length: seatCount(w) }, (_, i) => i + 1))]);
+  const total = lists.reduce((a, l) => a * l.length, 1);
+  console.log(`  winners 2^${k}=${1 << k}, ${L} direct into losers, ${B.entryRounds} entry round(s)`);
+  console.log(`  drop seats per winners round: ${dropRounds.map((w) => `WR${w}:${seatCount(w)}`).join('  ')}`);
+  console.log(`  ${total.toLocaleString()} arrangements`);
+
+  let best = null, bestCfg = null, ties = 0, worst = null;
+  const idx = new Array(lists.length).fill(0);
+  const perms = {};
+  for (;;) {
+    dropRounds.forEach((w, i) => (perms[w] = lists[i][idx[i]]));
+    const s = evaluateEntry(B, perms);
+    if (worst === null || better(worst, s)) worst = s;
+    if (best === null || better(s, best)) { best = s; bestCfg = dropRounds.map((w, i) => lists[i][idx[i]].slice()); ties = 1; }
+    else if (JSON.stringify(s) === JSON.stringify(best)) ties++;
+    let c = lists.length - 1;
+    while (c >= 0) { if (++idx[c] < lists[c].length) break; idx[c] = 0; c--; }
+    if (c < 0) break;
+  }
+  console.log(`  BEST  earliest rematch round per winners round: ${JSON.stringify(best)}  (${ties.toLocaleString()} tie)`);
+  console.log(`  WORST                                         : ${JSON.stringify(worst)}`);
+  console.log(`  ${JSON.stringify(best) === JSON.stringify(worst) ? '=> permutation IRRELEVANT for this shape' : '=> permutation MATTERS'}`);
+  dropRounds.forEach((w, i) => console.log(`     WR${w} seats <- droppers [${bestCfg[i].join(',')}]`));
+}

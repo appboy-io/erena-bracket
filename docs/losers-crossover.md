@@ -113,6 +113,49 @@ first). And the climber was pointed at 32, where the answer was already proven, 
 is what exposed it. Above k=5, seed the search FROM the shipped plan (`refine`) rather
 than from random arrangements.
 
+## When the losers bracket is seeded directly
+
+A pools phase can send its runners-up straight into the losers bracket of the next
+phase, which is what start.gg does with "Pools 2nd place and 3rd place". Those
+entrants have to reduce down to the winners round-1 loser count before they can
+merge with the drops, so the losers bracket gains entry rounds at the front and
+then resumes the usual alternating merge/reduce.
+
+`scripts/crossover-search.mjs entry <k> <L>` searches that shape exhaustively.
+Numbers below are the earliest losers round in which two players who met in
+winners round `r` can be re-paired — bigger is later is better. `99` means never.
+
+| winners | direct into losers | best | worst |
+|---------|--------------------|------|-------|
+| 8       | 8                  | `[5,6,99]`   | `[4,6,99]` |
+| 8       | 16                 | `[6,7,99]`   | `[5,7,99]` |
+| 16      | 16                 | `[6,7,8,99]` | `[4,6,8,99]` |
+| 16      | 32                 | `[7,8,9,99]` | `[5,7,9,99]` |
+
+Three things follow.
+
+**`CROSSOVER_PLAN` does not carry over.** It was derived for a losers bracket that
+starts empty. These shapes have their own optima, so the plan gains a dimension:
+keyed by (winners size, direct-entrant count), not by bracket size alone.
+
+**Winners round 1 gains a permutation it does not otherwise have.** In a standard
+bracket the round-1 losers are paired against each other on fixed geometry. Here
+each one is merged against a surviving direct entrant, so which seat they take is a
+free choice — and a consequential one.
+
+**The choice is worth up to two rounds.** At 16 winners and 32 direct, the best
+arrangement holds a winners round-1 rematch off until LR7; the worst allows it at
+LR5. Picking arbitrarily gives away real separation.
+
+Note the last column is always `99`: the winners-final pair can never meet again in
+losers, because the winners-final winner goes to the grand final rather than down.
+Their rematch, if it happens, is the grand final — which is the format working as
+intended, not double jeopardy.
+
+Pool rematches — two players who met in a POOL meeting again in the next phase —
+are a separate class and are not modelled here. That is what start.gg's "avoid
+previous matchups" toggle addresses.
+
 ## Keeping it honest
 
 Two tests hold the line, both in `src/double-elimination.test.ts` and
