@@ -156,6 +156,41 @@ Pool rematches — two players who met in a POOL meeting again in the next phase
 are a separate class and are not modelled here. That is what start.gg's "avoid
 previous matchups" toggle addresses.
 
+### `ENTRY_CROSSOVER_PLAN`
+
+The winning arrangements from the searches above, converted to the four named
+permutations and shipped as `ENTRY_CROSSOVER_PLAN` in `src/double-elimination.ts`,
+keyed `"{winnersBracketSize}x{directEntrants}"`:
+
+| shape | WR1 | WR2 | WR3 | WR4 |
+|-------|-----|-----|-----|-----|
+| `8x8`   | identity | reverse  | identity | — |
+| `8x16`  | identity | reverse  | identity | — |
+| `16x16` | identity | halfswap | identity | identity |
+| `16x32` | identity | halfswap | identity | identity |
+
+**`32x32` is out of reach of exhaustive search.** Unlike the empty-losers
+`exhaustive` mode (which only searches rounds 2..k-1), `entry` mode also
+permutes winners round 1, because that round's seat choice is free here. At
+`k=5`, WR1 alone has 16 seats, so the space is `16!x8!x4!x2!x1!` =
+40,493,130,637,639,680,000 (~4.05e19) arrangements — not a memory-tuning
+problem, genuinely intractable. Running it reproducibly OOMs:
+
+```
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed -
+JavaScript heap out of memory
+```
+
+`ENTRY_CROSSOVER_PLAN` has no `32x32` entry as a result, and `entryCrossoverNameFor`
+falls back to `'identity'` for it (and any other unsearched shape) — safe, but
+per the "worth up to two rounds" finding above, potentially up to two rounds
+short of optimal rematch separation. The near-term target shape is `8x16`
+(64-player pooled event, 8 winners + 16 direct entrants), which *is* searched
+and optimal. If a final phase the size of `32x32` is ever needed, the way to
+close this gap is a hill-climb/refine mode for `entry` search — seeded from a
+guess and improved by 1- and 2-swaps, the same technique `refine` already uses
+for the empty-losers table above k=5 — not a bigger heap.
+
 ## Keeping it honest
 
 Two tests hold the line, both in `src/double-elimination.test.ts` and
